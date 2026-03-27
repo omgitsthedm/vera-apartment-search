@@ -1,0 +1,33 @@
+{
+  "city": "New York City",
+  "boroughs": [
+    "Manhattan",
+    "Brooklyn"
+  ],
+  "neighborhoods": [
+    "East Village",
+    "Alphabet City",
+    "Greenwich Village",
+    "Lower East Side",
+    "Stuytown",
+    "West Village",
+    "Tribeca",
+    "SoHo",
+    "Chelsea",
+    "Williamsburg",
+    "Greenpoint",
+    "East Williamsburg"
+  ],
+  "unit_types": [
+    "studio",
+    "1 bedroom",
+    "1br"
+  ],
+  "max_rent": 2500,
+  "preferred_landlord_type": "independent",
+  "exclude_management_companies": false,
+  "must_have": [],
+  "nice_to_have": [],
+  "hard_rejects": [],
+  "run_frequency": "daily"
+}

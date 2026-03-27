@@ -1,0 +1,3 @@
+type,match_value,reason,severity
+owner_name,NBR Holdings LLC,Large managed operator with elevated complaint and dispute pattern in sample reference layer,high
+owner_name,East 9th Portfolio LLC,Portfolio-style leasing signal with weak owner-direct fit and higher complaint volume,medium
