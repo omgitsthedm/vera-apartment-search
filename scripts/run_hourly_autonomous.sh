@@ -11,6 +11,12 @@ export VERA_ROOT="$ROOT"
 export VERA_RUN_ID="$RUN_ID"
 export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
+# Fix macOS Python SSL: default cert bundle is missing, point to certifi
+SSL_CERT_FILE="$(/usr/local/bin/python3 -c 'import certifi; print(certifi.where())' 2>/dev/null)" || true
+if [[ -n "$SSL_CERT_FILE" && -f "$SSL_CERT_FILE" ]]; then
+  export SSL_CERT_FILE
+fi
+
 mkdir -p "$ROOT/logs" "$STATE_DIR"
 
 {

@@ -254,13 +254,16 @@ def recommendation_for(listing: dict[str, Any], overall: float, synthetic_risk: 
     confidence_band = listing.get("listing_confidence_band")
     auth_conf = listing.get("listing_authenticity_confidence", "low")
 
+    # NOTE: Thresholds recalibrated after Sprint 6 removed trust-inflating
+    # signals from the deal score (~10-12 pts of freshness, verification,
+    # multi-source bonus).  Raw deal scores now run lower than before.
     if confidence_band:
         # Full confidence engine has run — use the unified band
-        if overall >= 80 and confidence_band == "high" and auth_conf == "high":
+        if overall >= 70 and confidence_band == "high" and auth_conf == "high":
             return "pursue"
-        if overall >= 80 and confidence_band in ("high", "medium") and auth_conf == "high":
+        if overall >= 70 and confidence_band in ("high", "medium") and auth_conf == "high":
             return "pursue cautiously"
-        if overall >= 68 and confidence_band in ("high", "medium") and auth_conf != "low":
+        if overall >= 55 and confidence_band in ("high", "medium") and auth_conf != "low":
             return "pursue cautiously"
     else:
         # Fallback: raw field checks (first-pass scoring before snapshot)
@@ -269,24 +272,24 @@ def recommendation_for(listing: dict[str, Any], overall: float, synthetic_risk: 
         address_conf = listing.get("address_confidence", "none")
 
         if (
-            overall >= 80
+            overall >= 70
             and auth_conf == "high"
             and neighborhood_conf != "low"
             and verification == "matched_public_records"
         ):
             return "pursue"
-        if overall >= 80 and auth_conf == "high" and neighborhood_conf != "low":
+        if overall >= 70 and auth_conf == "high" and neighborhood_conf != "low":
             return "pursue cautiously"
         if (
-            overall >= 68
+            overall >= 55
             and auth_conf != "low"
             and address_conf not in ("low", "none")
             and neighborhood_conf != "low"
         ):
             return "pursue cautiously"
 
-    # Listings that score well but have weak trust go to manual review
-    if overall >= 60:
+    # Listings that score decently but have weak trust go to manual review
+    if overall >= 45:
         return "manual review"
 
     return "skip"

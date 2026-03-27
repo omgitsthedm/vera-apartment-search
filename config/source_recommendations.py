@@ -30,7 +30,8 @@ def _check_freshness(source: dict[str, Any]) -> str | None:
     cadence = source.get("cadence", "daily")
     # Freshness issues show up as low reliability + we can check the breakdown
     breakdown = source.get("reliability_breakdown", {})
-    freshness_score = breakdown.get("freshness")
+    freshness_entry = breakdown.get("freshness")
+    freshness_score = freshness_entry.get("raw") if isinstance(freshness_entry, dict) else freshness_entry
     if freshness_score is not None and freshness_score < 0.4:
         return f"Source stale for its {cadence} cadence. Agent may not be running or site may be blocking."
     return None
@@ -110,7 +111,10 @@ def recommend_run_actions(
         })
 
     # Stale sources
-    stale_sources = [s["name"] for s in sources if s.get("reliability_breakdown", {}).get("freshness", 1) < 0.4]
+    def _freshness_raw(s: dict) -> float:
+        entry = s.get("reliability_breakdown", {}).get("freshness", 1)
+        return entry.get("raw") if isinstance(entry, dict) else (entry if isinstance(entry, (int, float)) else 1.0)
+    stale_sources = [s["name"] for s in sources if _freshness_raw(s) < 0.4]
     if stale_sources:
         recommendations.append({
             "severity": "warn",
