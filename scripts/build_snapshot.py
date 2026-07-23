@@ -163,6 +163,10 @@ def listing_sections(record: dict[str, Any]) -> dict[str, Any]:
             "trust_strengths": record.get("trust_strengths") or [],
             "trust_caveats": record.get("trust_caveats") or [],
         },
+        "changes": {
+            "change_badge": record.get("change_badge"),
+            "change_detail": record.get("change_detail"),
+        },
     }
 
 
@@ -602,6 +606,21 @@ def build_snapshot() -> tuple[dict[str, Any], bool]:
         pass
 
     payload["run_trends"] = read_run_trends()
+
+    # Daily change tracking summary (from track_changes.py)
+    daily_changes_dir = STATE_DIR / "daily_changes"
+    if daily_changes_dir.exists():
+        today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        today_changes = read_json(daily_changes_dir / f"changes_{today}.json", default={})
+        if today_changes:
+            payload["daily_changes"] = today_changes
+            # Add change counts to summary
+            change_counts = today_changes.get("counts", {})
+            payload["summary"]["new_today"] = change_counts.get("new", 0)
+            payload["summary"]["price_drops"] = change_counts.get("price_drop", 0)
+            payload["summary"]["price_hikes"] = change_counts.get("price_hike", 0)
+            payload["summary"]["back_again"] = change_counts.get("back", 0)
+            payload["summary"]["gone"] = change_counts.get("gone", 0)
 
     success = snapshot_status == "success"
     return payload, success

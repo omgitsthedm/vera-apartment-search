@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DASHBOARD_ROOT="/Users/davidmarsh/Documents/Playground/projects/nyc-apartment-search-dashboard"
+DASHBOARD_ROOT="/Users/davidmarsh/Code/Personal/nyc-apartment-search-dashboard"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 PUBLISH_LOG="$ROOT/logs/publish_${STAMP}.log"
 

@@ -43,6 +43,12 @@ mkdir -p "$ROOT/logs"
   echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stage: score (scope=weekly)"
   python3 "$ROOT/scripts/score_listings.py" --scope weekly
 
+  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stage: ai_enrich"
+  python3 "$ROOT/scripts/ai_enrich.py" || echo "[WARN] ai_enrich failed — continuing with deterministic output"
+
+  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stage: track_changes"
+  python3 "$ROOT/scripts/track_changes.py" || echo "[WARN] track_changes failed — continuing without change badges"
+
   echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] stage: build_snapshot"
   python3 "$ROOT/scripts/build_snapshot.py"
 

@@ -3,9 +3,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
-RUN_ID="daily_${STAMP}"
-LOG_PATH="$ROOT/logs/run_daily_autonomous_${STAMP}.log"
+RUN_ID="nightly_${STAMP}"
+LOG_PATH="$ROOT/logs/run_nightly_autonomous_${STAMP}.log"
 STATE_DIR="$ROOT/state"
+GUARD_DIR="$STATE_DIR/schedule_guards"
+GUARD_FILE="$GUARD_DIR/nightly.json"
 
 export VERA_ROOT="$ROOT"
 export VERA_RUN_ID="$RUN_ID"
@@ -22,23 +24,50 @@ fi
 unset OPENAI_API_KEY
 
 # Fix macOS Python SSL: default cert bundle is missing, point to certifi
-SSL_CERT_FILE="$(/usr/local/bin/python3 -c 'import certifi; print(certifi.where())' 2>/dev/null)" || true
+SSL_CERT_FILE="$(python3 -c 'import certifi; print(certifi.where())' 2>/dev/null)" || true
 if [[ -n "$SSL_CERT_FILE" && -f "$SSL_CERT_FILE" ]]; then
   export SSL_CERT_FILE
 fi
 
-mkdir -p "$ROOT/logs" "$STATE_DIR"
+mkdir -p "$ROOT/logs" "$STATE_DIR" "$GUARD_DIR"
+
+# Once-per-ET-date guard: launchd re-fires missed jobs on wake, and a manual
+# run may already have claimed tonight — never run the nightly cycle twice
+# for the same ET calendar date.
+ET_DATE="$(TZ=America/New_York date +%Y-%m-%d)"
+if [[ -f "$GUARD_FILE" ]] && python3 - "$GUARD_FILE" "$ET_DATE" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        guard = json.load(f)
+except Exception:
+    sys.exit(1)
+sys.exit(0 if guard.get("last_et_date") == sys.argv[2] else 1)
+PY
+then
+  echo "Nightly cycle already claimed for ET date ${ET_DATE}; skipping." | tee -a "$LOG_PATH"
+  exit 0
+fi
+python3 - "$GUARD_FILE" "$ET_DATE" <<'PY'
+import json, sys
+from datetime import datetime, timezone
+with open(sys.argv[1], "w") as f:
+    json.dump({
+        "cadence": "nightly",
+        "last_et_date": sys.argv[2],
+        "timezone": "America/New_York",
+        "claimed_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }, f, indent=2)
+PY
 
 {
-  echo "=== VERA autonomous daily cycle ==="
+  echo "=== VERA autonomous nightly cycle ==="
   echo "TIMESTAMP: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "RUN_ID:    $RUN_ID"
   echo "ROOT:      $ROOT"
   echo "SCRIPT:    $0"
   echo "USER:      $(whoami)"
-  echo "PWD:       $(pwd)"
   echo "PYTHON:    $(which python3 2>/dev/null || echo 'NOT FOUND')"
-  echo "PATH:      $PATH"
   echo "========================================="
 
   python3 -c "
@@ -46,7 +75,7 @@ import json
 from datetime import datetime, timezone
 state = {
     'run_id': '$RUN_ID',
-    'cadence': 'daily',
+    'cadence': 'nightly',
     'started_at': datetime.now(timezone.utc).isoformat(),
     'status': 'running',
     'pipeline_status': 'pending',
@@ -96,7 +125,7 @@ import json
 from datetime import datetime, timezone
 state = {
     'run_id': '$RUN_ID',
-    'cadence': 'daily',
+    'cadence': 'nightly',
     'started_at': '$STAMP',
     'finished_at': datetime.now(timezone.utc).isoformat(),
     'status': '$OUTCOME',
@@ -114,11 +143,9 @@ with open('$STATE_DIR/latest_run.json', 'w') as f:
 
   echo ""
   echo "================================================================"
-  echo "VERA DAILY CYCLE OUTCOME: ${OUTCOME^^}"
+  echo "VERA NIGHTLY CYCLE OUTCOME: ${OUTCOME^^}"
   echo "RUN_ID: $RUN_ID"
   echo "================================================================"
+} 2>&1 | tee -a "$LOG_PATH"
 
-  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] VERA autonomous daily cycle complete"
-} 2>&1 | tee "$LOG_PATH"
-
-echo "Autonomous daily log written to: $LOG_PATH"
+echo "Autonomous nightly log written to: $LOG_PATH"

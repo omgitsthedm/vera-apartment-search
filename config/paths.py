@@ -43,7 +43,7 @@ LOG_DIR = VERA_ROOT / "logs"
 DASHBOARD_ROOT = Path(
     os.environ.get(
         "VERA_DASHBOARD_ROOT",
-        "/Users/davidmarsh/Documents/Playground/projects/nyc-apartment-search-dashboard",
+        "/Users/davidmarsh/Code/Personal/nyc-apartment-search-dashboard",
     )
 )
 DASHBOARD_SITE_DIR = DASHBOARD_ROOT / "site"

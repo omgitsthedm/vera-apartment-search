@@ -9,7 +9,17 @@ STATE_DIR="$ROOT/state"
 
 export VERA_ROOT="$ROOT"
 export VERA_RUN_ID="$RUN_ID"
-export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
+# Source local env (API keys, overrides) — launchd doesn't inherit shell env
+if [[ -f "$ROOT/.env" ]]; then
+  set -a
+  source "$ROOT/.env"
+  set +a
+fi
+
+# Deterministic/free mode: ai_enrich falls back to dry-run without this key.
+unset OPENAI_API_KEY
 
 # Fix macOS Python SSL: default cert bundle is missing, point to certifi
 SSL_CERT_FILE="$(/usr/local/bin/python3 -c 'import certifi; print(certifi.where())' 2>/dev/null)" || true
