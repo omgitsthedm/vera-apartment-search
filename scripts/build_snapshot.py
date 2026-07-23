@@ -33,6 +33,14 @@ LATEST_ATTEMPT_PATH = METADATA_ROOT / "latest_attempt.json"
 LAST_SUCCESS_PATH = METADATA_ROOT / "last_success.json"
 
 
+def _platform_version() -> str:
+    """Platform version from the repo-root VERSION file (see CHANGELOG.md)."""
+    try:
+        return (ROOT / "VERSION").read_text().strip()
+    except OSError:
+        return "unknown"
+
+
 def relocated(path_like: str | None, fallback_dir: Path) -> Path | None:
     return state_path_or_latest(path_like, fallback_dir, "*")
 
@@ -488,6 +496,7 @@ def build_snapshot() -> tuple[dict[str, Any], bool]:
         "app": {
             "name": "NYC Apartment Search",
             "subtitle": "VERA Ops Terminal",
+            "version": _platform_version(),
         },
         "snapshot": {
             "status": snapshot_status,
