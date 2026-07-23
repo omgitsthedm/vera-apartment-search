@@ -6,7 +6,7 @@
       "enabled": true,
       "access_mode": "live_html",
       "status": "live",
-      "cadence": "hourly",
+      "cadence": "daily",
       "source_tier": "primary",
       "source_class": "market",
       "search_mode": "permanent",
@@ -40,7 +40,7 @@
       "enabled": true,
       "access_mode": "live_html",
       "status": "live",
-      "cadence": "hourly",
+      "cadence": "daily",
       "source_tier": "primary",
       "source_class": "market",
       "search_mode": "permanent",
@@ -70,7 +70,7 @@
       "enabled": true,
       "access_mode": "live_html",
       "status": "live",
-      "cadence": "hourly",
+      "cadence": "daily",
       "source_tier": "primary",
       "source_class": "market",
       "search_mode": "permanent",
@@ -110,7 +110,7 @@
       "cache_ttl_hours": 24,
       "max_price": 2500,
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/leasebreak",
-      "notes": "Lease takeover and assignment listings. Partial adapter — HTML structure may vary. Treats listings as bridge/temporary housing with building-level verification when address data exists."
+      "notes": "Lease takeover and assignment listings. Partial adapter \u2014 HTML structure may vary. Treats listings as bridge/temporary housing with building-level verification when address data exists."
     },
     {
       "source_name": "nybits",
@@ -127,7 +127,7 @@
       "cache_ttl_hours": 24,
       "max_price": 2500,
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/nybits",
-      "notes": "NYC aggregator especially useful for smaller operators, direct-owner, and less-corporate inventory. HTML parsing is experimental — structure may change."
+      "notes": "NYC aggregator especially useful for smaller operators, direct-owner, and less-corporate inventory. HTML parsing is experimental \u2014 structure may change."
     },
     {
       "source_name": "housing_connect",
@@ -148,13 +148,13 @@
       "cache_ttl_hours": 48,
       "max_price": 2500,
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/housing_connect",
-      "notes": "Official NYC Housing Connect lottery portal. High-trust source. Listings are lottery-based with application deadlines. Adapter is experimental — site uses React SPA with dynamic content loading."
+      "notes": "Official NYC Housing Connect lottery portal. High-trust source. Listings are lottery-based with application deadlines. Adapter is experimental \u2014 site uses React SPA with dynamic content loading."
     },
     {
       "source_name": "hdc_hpd_rerentals",
-      "enabled": true,
+      "enabled": false,
       "access_mode": "live_html",
-      "status": "experimental",
+      "status": "not_feasible",
       "cadence": "daily",
       "source_tier": "unconventional_high",
       "source_class": "affordable",
@@ -164,7 +164,7 @@
       "max_results_per_query": 10,
       "cache_ttl_hours": 48,
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/hdc_hpd_rerentals",
-      "notes": "HDC/HPD re-rental and available apartment listings. Official public-program source. Adapter is experimental — page structure varies."
+      "notes": "2026-07-23: Apartments-Available.html returns 404 \u2014 page removed in HDC site redesign; re-rentals appear to route via Housing Connect (already covered). Re-enable if a new listings URL surfaces."
     },
     {
       "source_name": "nooklyn",
@@ -181,7 +181,7 @@
       "cache_ttl_hours": 24,
       "max_price": 2500,
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/nooklyn",
-      "notes": "Brooklyn-focused listings. Experimental adapter — may require adjustment after live testing. Useful for Brooklyn neighborhood coverage."
+      "notes": "Brooklyn-focused listings. Experimental adapter \u2014 may require adjustment after live testing. Useful for Brooklyn neighborhood coverage."
     },
     {
       "source_name": "listings_project",
@@ -201,7 +201,7 @@
       "max_results_per_query": 10,
       "cache_ttl_hours": 168,
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/listings_project",
-      "notes": "Curated human-signal source. Weekly email newsletter with screened listings. Subscription-based — cannot fully automate. Weekly cadence checks public page for any extractable listings; full review requires manual email parsing. Enrichment only when location/building evidence is strong."
+      "notes": "Curated human-signal source. Weekly email newsletter with screened listings. Subscription-based \u2014 cannot fully automate. Weekly cadence checks public page for any extractable listings; full review requires manual email parsing. Enrichment only when location/building evidence is strong."
     },
     {
       "source_name": "spareroom",
@@ -218,7 +218,7 @@
       "cache_ttl_hours": 48,
       "max_price": 2500,
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/spareroom",
-      "notes": "Room share / roommate matching site. Fallback only — bridge/temporary housing. Clearly labeled as roommate-oriented. Only surfaces if no permanent options exist."
+      "notes": "Room share / roommate matching site. Fallback only \u2014 bridge/temporary housing. Clearly labeled as roommate-oriented. Only surfaces if no permanent options exist."
     },
     {
       "source_name": "furnished_finder",
@@ -229,7 +229,7 @@
       "source_tier": "fallback",
       "search_mode": "bridge",
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/furnished_finder",
-      "notes": "Furnished monthly rentals aimed at traveling healthcare professionals. Login-gated for full listing details. Fallback only — bridge/temporary housing. Not enabled until login access is confirmed."
+      "notes": "Furnished monthly rentals aimed at traveling healthcare professionals. Login-gated for full listing details. Fallback only \u2014 bridge/temporary housing. Not enabled until login access is confirmed."
     },
     {
       "source_name": "diggz",
