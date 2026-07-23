@@ -114,6 +114,7 @@ with open('$STATE_DIR/latest_run.json', 'w') as f:
 
   if [ "$PIPELINE_OK" = "true" ] && [ "$PUBLISH_OK" = "true" ]; then
     OUTCOME="success"
+    python3 "$ROOT/scripts/notify_digest.py" || echo "[WARN] digest notification failed (non-fatal)"
   elif [ "$PIPELINE_OK" = "true" ] && [ "$PUBLISH_OK" = "false" ]; then
     OUTCOME="pipeline_ok_publish_failed"
   else

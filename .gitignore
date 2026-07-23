@@ -44,3 +44,6 @@ Thumbs.db
 node_modules/
 dist/
 build/
+
+# Personal notification topic (semi-secret)
+configs/notify.json
