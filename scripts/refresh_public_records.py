@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import ssl
 import sys
 import urllib.parse
@@ -51,7 +52,19 @@ DATASETS = {
     "registrations": "https://data.cityofnewyork.us/resource/tesw-yqqr.json",
     "litigation": "https://data.cityofnewyork.us/resource/59kj-x8nc.json",
     "complaints_311": "https://data.cityofnewyork.us/resource/erm2-nwe9.json",
+    "registration_contacts": "https://data.cityofnewyork.us/resource/feu5-w2e2.json",
+    "pluto": "https://data.cityofnewyork.us/resource/64uk-42ks.json",
 }
+
+# PLUTO building classes that identify cooperative buildings.
+COOP_BLDG_CLASSES = ("C6", "C8", "D0", "D4")
+
+# Suffixes that mark a PLUTO ownername as a business entity rather than a person.
+CORPORATE_NAME_TOKENS = (
+    " LLC", " L.L.C", " CORP", " INC", " LP", " L.P", " TRUST", " ASSOC",
+    " REALTY", " MGMT", " MANAGEMENT", " HOLDINGS", " PARTNERS", " GROUP",
+    " ESTATES", " PROPERTIES", " EQUITIES", " VENTURES", " CAPITAL",
+)
 
 
 def load_deduped_rows() -> list[dict[str, Any]]:
@@ -159,6 +172,18 @@ def geosearch_lookup(listing: dict[str, Any]) -> dict[str, Any]:
     query = urllib.parse.urlencode({"text": query_text, "size": "5"})
     payload = read_json_url(f"{GEOSEARCH_URL}?{query}")
     features = payload.get("features") or []
+    if not features and address:
+        # Unit designators ("#1B", "Apt 4", "Unit 2F") routinely sink the
+        # geocoder — retry once with the street address stripped down.
+        bare = re.sub(r"\s*(#|\bapt\.?\b|\bunit\b|\bste\.?\b)\s*\S+", "", str(address), flags=re.I).strip(" ,")
+        if bare and bare.lower() != str(address).lower():
+            retry_parts = [part for part in [bare, neighborhood, borough, "New York NY"] if part]
+            retry_text = ", ".join(str(part) for part in retry_parts)
+            retry_query = urllib.parse.urlencode({"text": retry_text, "size": "5"})
+            payload = read_json_url(f"{GEOSEARCH_URL}?{retry_query}")
+            features = payload.get("features") or []
+            if features:
+                query_text = retry_text
     if not features:
         return {
             "query_text": query_text,
@@ -187,6 +212,128 @@ def geosearch_lookup(listing: dict[str, Any]) -> dict[str, Any]:
         "bin": addendum.get("bin"),
         "pad_version": addendum.get("version"),
     }
+
+
+def _person_name(row: dict[str, Any]) -> str:
+    return " ".join(p for p in [str(row.get("firstname") or "").strip(), str(row.get("lastname") or "").strip()] if p)
+
+
+def _looks_corporate(name: str) -> bool:
+    upper = f" {name.upper()}"
+    return any(token in upper for token in CORPORATE_NAME_TOKENS)
+
+
+def fetch_ownership(bbl: str | None, registration_id: str | None) -> dict[str, Any]:
+    """Resolve real owner identity from HPD registration contacts + PLUTO.
+
+    Returns owner_name / owner_type ('individual' | 'llc' | 'coop_hdfc'),
+    owner_source, owner_portfolio_estimate (registration count sharing the
+    same owner identity, '50' means 50+), unit_count, is_coop, coop_class.
+    All Socrata calls go through the shared cached helpers.
+    """
+    out: dict[str, Any] = {
+        "owner_name": None,
+        "owner_type": None,
+        "owner_source": None,
+        "owner_portfolio_estimate": None,
+        "unit_count": None,
+        "is_coop": False,
+        "coop_class": None,
+    }
+
+    # --- PLUTO: unit count, building class (co-op detection), owner fallback
+    pluto_row = None
+    bbl_digits = re.sub(r"\D", "", str(bbl or ""))
+    if bbl_digits:
+        rows = socrata_request(
+            DATASETS["pluto"],
+            {
+                "$select": "ownername,unitsres,bldgclass,yearbuilt",
+                "$where": f"bbl={bbl_digits}",
+                "$limit": "1",
+            },
+        )
+        pluto_row = rows[0] if rows else None
+    if pluto_row:
+        try:
+            out["unit_count"] = int(float(pluto_row.get("unitsres") or 0)) or None
+        except (TypeError, ValueError):
+            pass
+        bldgclass = str(pluto_row.get("bldgclass") or "").upper()
+        if any(bldgclass.startswith(c) for c in COOP_BLDG_CLASSES):
+            out["is_coop"] = True
+            out["coop_class"] = bldgclass
+
+    # --- HPD registration contacts: authoritative owner identity
+    corporate_name = None
+    individual_name = None
+    head_officer = None
+    if registration_id:
+        contacts = socrata_request(
+            DATASETS["registration_contacts"],
+            {
+                "$select": "type,corporationname,firstname,lastname",
+                "$where": f"registrationid='{registration_id}'",
+                "$limit": "20",
+            },
+        )
+        for row in contacts:
+            ctype = str(row.get("type") or "").strip().lower()
+            if ctype == "corporateowner" and not corporate_name:
+                corporate_name = str(row.get("corporationname") or "").strip() or _person_name(row) or None
+            elif ctype in ("individualowner", "jointowner") and not individual_name:
+                individual_name = _person_name(row) or None
+            elif ctype == "headofficer" and not head_officer:
+                head_officer = _person_name(row) or None
+
+    if corporate_name:
+        upper = corporate_name.upper()
+        out["owner_type"] = "coop_hdfc" if "HDFC" in upper else "llc"
+        out["owner_name"] = corporate_name
+        out["owner_source"] = "hpd_registration_contacts"
+    elif individual_name:
+        out["owner_type"] = "individual"
+        out["owner_name"] = individual_name
+        out["owner_source"] = "hpd_registration_contacts"
+    elif head_officer:
+        # A head officer with no corporate owner reads as a person-run building.
+        out["owner_type"] = "individual"
+        out["owner_name"] = head_officer
+        out["owner_source"] = "hpd_head_officer"
+    elif pluto_row and str(pluto_row.get("ownername") or "").strip():
+        pluto_owner = str(pluto_row["ownername"]).strip()
+        out["owner_name"] = pluto_owner
+        out["owner_source"] = "pluto_ownername"
+        if "HDFC" in pluto_owner.upper():
+            out["owner_type"] = "coop_hdfc"
+        else:
+            out["owner_type"] = "llc" if _looks_corporate(pluto_owner) else "individual"
+
+    # --- Portfolio estimate: how many registered buildings share this owner?
+    portfolio_where = None
+    if corporate_name:
+        safe = corporate_name.replace("'", "''")
+        portfolio_where = f"upper(corporationname)='{safe.upper()}'"
+    elif out["owner_name"] and out["owner_source"] in ("hpd_registration_contacts", "hpd_head_officer"):
+        parts = out["owner_name"].split()
+        if len(parts) >= 2:
+            first = parts[0].replace("'", "''").upper()
+            last = " ".join(parts[1:]).replace("'", "''").upper()
+            portfolio_where = f"upper(firstname)='{first}' AND upper(lastname)='{last}'"
+    if portfolio_where:
+        rows = socrata_request(
+            DATASETS["registration_contacts"],
+            {
+                "$select": "registrationid",
+                "$where": portfolio_where,
+                "$group": "registrationid",
+                "$limit": "50",
+            },
+        )
+        if rows:
+            out["owner_portfolio_estimate"] = len(rows)
+
+    return out
 
 
 def address_where_clauses(geo: dict[str, Any], listing: dict[str, Any]) -> dict[str, str | None]:
@@ -314,6 +461,11 @@ def live_reference_from_sources(listing: dict[str, Any], geo: dict[str, Any]) ->
             f"bbl='{bbl}' AND lower(descriptor) LIKE '%bedbug%' AND created_date >= '{LOOKBACK_START}'",
         )
 
+    ownership = fetch_ownership(
+        bbl,
+        (registration_row or {}).get("registrationid") or (building_row or {}).get("registrationid"),
+    )
+
     lookup_status = "matched" if (building_row or registration_row or bbl or bin_value) else "no_match"
     notes = (
         "Building joined through NYC GeoSearch with BBL/BIN-first lookups. "
@@ -337,6 +489,13 @@ def live_reference_from_sources(listing: dict[str, Any], geo: dict[str, Any]) ->
         "registrationid": (registration_row or {}).get("registrationid") or (building_row or {}).get("registrationid"),
         "registration_signal": "registered" if (registration_row or {}).get("registrationid") or (building_row or {}).get("registrationid") else "not found",
         "lastregistrationdate": (registration_row or {}).get("lastregistrationdate"),
+        "owner_name": ownership.get("owner_name"),
+        "owner_type": ownership.get("owner_type"),
+        "owner_source": ownership.get("owner_source"),
+        "owner_portfolio_estimate": ownership.get("owner_portfolio_estimate"),
+        "unit_count": ownership.get("unit_count"),
+        "is_coop": ownership.get("is_coop"),
+        "coop_class": ownership.get("coop_class"),
         "zip": (registration_row or {}).get("zip") or geo.get("resolved_postalcode") or listing.get("zip"),
         "borough_resolved": normalize_borough(geo.get("resolved_borough")) or normalize_borough(listing.get("borough")) or infer_borough(listing.get("neighborhood"), listing.get("zip")),
         "resolved_borough": geo.get("resolved_borough"),

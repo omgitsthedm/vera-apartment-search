@@ -445,7 +445,23 @@ def classify_landlord(
         reasons.append("no-fee signal")
     if reference and reference.get("owner_type") == "individual":
         score += 20.0
-        reasons.append("public record suggests individual owner")
+        source = reference.get("owner_source") or "public record"
+        reasons.append(f"public record suggests individual owner ({source})")
+    if reference and reference.get("owner_type") == "coop_hdfc":
+        score += 10.0
+        reasons.append("HDFC cooperative ownership (resident-run, non-corporate)")
+    if reference and reference.get("is_coop"):
+        score += 12.0
+        reasons.append(f"co-op building (class {reference.get('coop_class') or '?'}) — rental offered in a cooperative")
+    portfolio = reference.get("owner_portfolio_estimate") if reference else None
+    if portfolio is not None:
+        if portfolio <= 2:
+            score += 8.0
+            reasons.append(f"owner registered on only {int(portfolio)} building(s) — single-building owner signal")
+        elif portfolio >= 10:
+            score -= 12.0
+            label = "50+" if portfolio >= 50 else str(int(portfolio))
+            reasons.append(f"owner registered on {label} buildings — portfolio landlord")
     if reference and float(reference.get("unit_count") or 0) <= 6:
         score += 10.0
         reasons.append("small-building signal")

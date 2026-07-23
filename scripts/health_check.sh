@@ -60,18 +60,12 @@ check_writable_dir "$ROOT/scored" "scored dir"
 check_writable_dir "$ROOT/reports" "reports dir"
 check_writable_dir "$ROOT/exports" "exports dir"
 
+# Ollama is optional: the pipeline is deterministic (ai_enrich dry-runs
+# without a key) and no stage shells out to a local LLM.
 if command -v ollama >/dev/null 2>&1; then
-  passes+=("ollama available")
-  model_list="$(ollama list 2>/dev/null | awk 'NR>1 {print $1}')"
-  for model in qwen3:8b qwen3:14b llama3.1:8b; do
-    if printf '%s\n' "$model_list" | grep -Fx "$model" >/dev/null 2>&1; then
-      passes+=("model present: $model")
-    else
-      failures+=("model missing: $model")
-    fi
-  done
+  passes+=("ollama available (optional)")
 else
-  failures+=("ollama missing from PATH")
+  passes+=("ollama absent (optional — deterministic mode)")
 fi
 
 if command -v netlify >/dev/null 2>&1; then
