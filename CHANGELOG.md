@@ -9,6 +9,13 @@ Component prefixes: **engine** · **dashboard** · **site** (littlefightnyc.com)
 
 ---
 
+## 1.0.2 — 2026-07-23 · "Pictures or It Didn't Happen"
+
+### engine
+- Photos now actually reach the shortlist: `normalize_listings.py` parsed `image_urls` from raw records but never emitted them — the field existed in every downstream schema, permanently empty, in every era of the pipeline. One line; the 1.0.1 extraction work now flows end-to-end.
+
+---
+
 ## 1.0.1 — 2026-07-23 · "Wide Net"
 
 ### engine
