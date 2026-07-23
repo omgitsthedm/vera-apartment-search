@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Publish must resolve state under THIS checkout regardless of inherited env.
+export VERA_ROOT="$ROOT"
 DASHBOARD_ROOT="/Users/davidmarsh/Code/Personal/nyc-apartment-search-dashboard"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 PUBLISH_LOG="$ROOT/logs/publish_${STAMP}.log"

@@ -23,6 +23,9 @@ fi
 # Deterministic/free mode: ai_enrich falls back to dry-run without this key.
 unset OPENAI_API_KEY
 
+# .env may carry a stale VERA_ROOT (archive-era) — this checkout's path wins.
+export VERA_ROOT="$ROOT"
+
 # Fix macOS Python SSL: default cert bundle is missing, point to certifi
 SSL_CERT_FILE="$(python3 -c 'import certifi; print(certifi.where())' 2>/dev/null)" || true
 if [[ -n "$SSL_CERT_FILE" && -f "$SSL_CERT_FILE" ]]; then
