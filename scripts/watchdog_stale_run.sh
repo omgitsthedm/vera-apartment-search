@@ -20,3 +20,11 @@ fi
 
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) STALE: $MSG" >> "$ROOT/logs/watchdog.log"
 osascript -e "display notification \"$MSG\" with title \"VERA watchdog\" sound name \"Basso\"" || true
+
+# Also push to the phone via the same ntfy topic the digest uses.
+TOPIC=$(python3 -c "import json;print(json.load(open('$ROOT/configs/notify.json')).get('ntfy_topic',''))" 2>/dev/null || true)
+if [[ -n "${TOPIC:-}" ]]; then
+  curl -s --max-time 15 -X POST "https://ntfy.sh/$TOPIC" \
+    -H "Title: VERA is stuck" -H "Priority: high" -H "Tags: warning" \
+    -d "$MSG" >/dev/null || true
+fi
