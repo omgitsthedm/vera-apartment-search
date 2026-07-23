@@ -235,8 +235,25 @@ def extract_square_feet(page: str, body: str, title: str) -> int | None:
 
 
 def extract_image_urls(page: str) -> list[str]:
+    """Up to 6 unique full-size gallery images.
+
+    Detail pages list every image twice (600x450 full + 50x50c thumb); skip thumbs
+    and dedupe by the image id so each photo appears once at full size.
+    """
     urls = re.findall(r"https://images\.craigslist\.org/[A-Za-z0-9_/-]+\.jpg", page)
-    return unique_strings(urls)
+    full_size: list[str] = []
+    seen_ids: set[str] = set()
+    for url in urls:
+        if "50x50" in url:
+            continue
+        image_id = re.sub(r"_\d+x\d+c?\.jpg$", "", url.rsplit("/", 1)[-1])
+        if image_id in seen_ids:
+            continue
+        seen_ids.add(image_id)
+        full_size.append(url)
+        if len(full_size) >= 6:
+            break
+    return full_size
 
 
 def extract_ld_posting_data(page: str) -> dict[str, Any]:
@@ -1057,6 +1074,13 @@ def discover_craigslist_live(
     max_rent = int(source.get("max_price") or preferences.get("max_rent") or 0)
     searches = build_craigslist_searches(source, preferences)
     allowed_codes = allowed_craigslist_boroughs(preferences)
+    # Catalog-configured borough searches define the discovery scope: if the catalog
+    # explicitly asks for a borough (e.g. Queens), keep its records even when the
+    # preferences borough list (used to trim text-query noise) is narrower.
+    for term in source.get("query_terms") or []:
+        term_code = BOROUGH_NAME_TO_SITE.get(str(term).strip().lower())
+        if term_code:
+            allowed_codes.add(term_code)
     cache_path = STATE_ROOT / f"{source_name}_listing_cache.json"
     cache = read_json(cache_path, default={})
 
