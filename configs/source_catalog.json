@@ -10,30 +10,20 @@
       "source_tier": "primary",
       "source_class": "market",
       "search_mode": "permanent",
-      "search_base_url": "https://newyork.craigslist.org/search/apa",
+      "search_base_url": "https://sapi.craigslist.org/web/v8/postings/search/full",
       "alert_thresholds": {
         "confidence_min": 0.5,
         "drop_threshold_pct": 65
       },
       "request_delay_ms": 1200,
-      "max_results_per_query": 6,
+      "max_results_per_query": 30,
       "cache_ttl_hours": 18,
       "query_terms": [
-        "East Village",
-        "Alphabet City",
-        "Greenwich Village",
-        "Lower East Side",
-        "Stuytown",
-        "West Village",
-        "Tribeca",
-        "SoHo",
-        "Chelsea",
-        "Williamsburg",
-        "Greenpoint",
-        "East Williamsburg"
+        "Manhattan",
+        "Brooklyn"
       ],
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/craigslist",
-      "notes": "Live public HTML capture with conservative rate limits, cache reuse, and query-per-neighborhood discovery."
+      "notes": "2026-07-23: craigslist HTML search became a JS shell (no result links); discovery now uses the public sapi.craigslist.org JSON search endpoint (same data the shell loads) and still fetches detail pages as HTML. Query terms switched from neighborhood text queries to borough-scoped searches (mnh/apa, brk/apa): posters pick neighborhoods from a dropdown, not ad text, so text queries matched only ~60 spam-heavy items while borough feeds carry the real inventory. Neighborhood matching happens downstream from geo/hood data. Rate limits and cache reuse unchanged."
     },
     {
       "source_name": "streeteasy",
@@ -63,7 +53,7 @@
         "East Williamsburg"
       ],
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/streeteasy",
-      "notes": "Live adapter using embedded JSON-LD data from StreetEasy search result pages. NYC-specific. No detail page fetch needed."
+      "notes": "2026-07-23: StreetEasy moved search results into the Next.js React Flight stream (edges are $-refs to numbered chunks); adapter parses the chunk map now. Not bot-walled -- plain urllib still gets full SSR pages. Yield warning: sub-$2500 studio/1BR inventory in these neighborhoods is nearly zero right now (observed totalCount 0 for most areas, East Village at $6000 cap = 189), so low daily counts are market reality, not extraction failure."
     },
     {
       "source_name": "renthop",

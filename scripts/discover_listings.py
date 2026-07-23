@@ -24,7 +24,7 @@ from config.anomaly_detector import check_source_anomalies
 from config.source_reliability import record_source_run
 
 RUN_STAMP = utc_stamp()
-PARSER_VERSION = "2026-03-27a"
+PARSER_VERSION = "2026-07-23a"
 
 # Per-source extraction strategy metadata.
 # strategy_used: primary extraction method for each source.
@@ -32,7 +32,7 @@ PARSER_VERSION = "2026-03-27a"
 SOURCE_STRATEGIES: dict[str, dict[str, Any]] = {
     "streeteasy": {"strategy_used": "embedded_search_nodes", "base_confidence": 0.90},
     "renthop": {"strategy_used": "json_ld_detail_page", "base_confidence": 0.92},
-    "craigslist": {"strategy_used": "html_regex", "base_confidence": 0.80},
+    "craigslist": {"strategy_used": "search_api_json_detail_html", "base_confidence": 0.80},
     "leasebreak": {"strategy_used": "html_dom_selectors", "base_confidence": 0.65},
     "nybits": {"strategy_used": "html_dom_selectors", "base_confidence": 0.60},
     "housing_connect": {"strategy_used": "html_dom_selectors", "base_confidence": 0.50},
@@ -116,6 +116,13 @@ def read_text_url(url: str, timeout: int = 25) -> str:
     request = urllib.request.Request(url, headers=REQUEST_HEADERS)
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read().decode("utf-8", "ignore")
+
+
+def read_text_url_final(url: str, timeout: int = 25) -> tuple[str, str]:
+    """Fetch a URL and return (body, final_url) so redirects reveal the canonical URL."""
+    request = urllib.request.Request(url, headers=REQUEST_HEADERS)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read().decode("utf-8", "ignore"), str(response.url or url)
 
 
 def unique_strings(values: list[str]) -> list[str]:
@@ -243,7 +250,9 @@ def extract_ld_posting_data(page: str) -> dict[str, Any]:
 
 
 def borough_from_craigslist_url(url: str) -> str | None:
-    match = re.search(r"newyork\.craigslist\.org/([a-z]{3})/", url)
+    # Restrict to real borough codes: sapi-era detail URLs omit the subarea segment,
+    # and a generic 3-letter match would wrongly capture the "apa" category segment.
+    match = re.search(r"newyork\.craigslist\.org/(mnh|brk|que|brx|stn)/", url)
     if not match:
         return None
     return BOROUGH_SITE_TO_NAME.get(match.group(1))
@@ -295,23 +304,46 @@ def infer_amenities(page: str, body: str) -> list[str]:
     return unique_strings(amenities)
 
 
+CRAIGSLIST_SAPI_BASE = "https://sapi.craigslist.org/web/v8/postings/search/full"
+
+
 def build_craigslist_searches(source: dict[str, Any], preferences: dict[str, Any]) -> list[dict[str, str]]:
-    neighborhoods = list(source.get("query_terms") or preferences.get("neighborhoods") or [])
+    """Build craigslist search-API URLs.
+
+    2026-07: newyork.craigslist.org/search/apa now 301s to a www.craigslist.org JS shell
+    with no result links in the HTML (JSON-LD there has no URLs either). The shell loads
+    results from the public sapi.craigslist.org JSON endpoint, which works with plain
+    urllib + the browser UA, so that endpoint is now the search data source.
+    "batch=3-0-360-0-0" scopes the search to area 3 (newyork).
+    """
+    query_terms = list(source.get("query_terms") or preferences.get("neighborhoods") or [])
     max_rent = source.get("max_price") or preferences.get("max_rent") or 2500
-    base_url = str(source.get("search_base_url") or "https://newyork.craigslist.org/search/apa")
+    configured = str(source.get("search_base_url") or "")
+    base_url = configured if "sapi.craigslist.org" in configured else CRAIGSLIST_SAPI_BASE
     searches: list[dict[str, str]] = []
-    for neighborhood in neighborhoods:
+    for term in query_terms:
+        # Borough-name terms become borough-scoped searches (searchPath=mnh/apa etc.).
+        # Posters pick their neighborhood from a dropdown and often never write it in
+        # the ad text, so free-text neighborhood queries miss most real inventory
+        # while attracting keyword-stuffed spam. Non-borough terms stay text queries.
+        borough_code = BOROUGH_NAME_TO_SITE.get(term.strip().lower())
         params = {
-            "query": neighborhood,
+            "batch": "3-0-360-0-0",
+            "cc": "US",
+            "lang": "en",
+            "searchPath": f"{borough_code}/apa" if borough_code else "apa",
             "max_price": str(int(float(max_rent))),
             "min_bedrooms": "0",
             "max_bedrooms": "1",
-            "availabilityMode": "0",
-            "sale_date": "all dates",
+            # Newest first (the old HTML search default). Relevance order front-loads
+            # stale cross-borough spam clusters into the per-query candidate slots.
+            "sort": "date",
         }
+        if not borough_code:
+            params["query"] = term
         searches.append(
             {
-                "label": neighborhood,
+                "label": term,
                 "url": f"{base_url}?{urllib.parse.urlencode(params)}",
             }
         )
@@ -335,13 +367,61 @@ def cache_is_fresh(entry: dict[str, Any], ttl_hours: int) -> bool:
     return fetched_at >= now_utc() - timedelta(hours=ttl_hours)
 
 
-def extract_listing_urls(search_html: str, max_results: int) -> list[str]:
-    urls = unique_strings(URL_RE.findall(search_html))
-    return urls[:max_results]
+def extract_listing_urls(search_body: str, max_results: int) -> list[str]:
+    """Extract detail-page URLs from a craigslist search response.
+
+    Primary path (2026-07): the response is sapi.craigslist.org JSON. Each item array
+    carries a posting-id offset at index 0 (real id = decode.minPostingId + offset) and
+    a [6, "<slug>"] element with the URL slug. The borough subarea cannot be decoded
+    reliably from the item, so URLs are built without it -- craigslist 301s
+    /apa/d/<slug>/<id>.html to the canonical borough URL at fetch time.
+    Falls back to the legacy HTML regex for old-style search pages.
+    """
+    try:
+        payload = json.loads(search_body)
+    except json.JSONDecodeError:
+        return unique_strings(URL_RE.findall(search_body))[:max_results]
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        return []
+    decode = data.get("decode") if isinstance(data.get("decode"), dict) else {}
+    min_posting_id = int(decode.get("minPostingId") or 0)
+    # Items after firstNearbyResultId belong to other craigslist areas (New Haven,
+    # Boston, ...) and 404 when built against newyork; take in-area results only.
+    first_nearby_id = data.get("firstNearbyResultId")
+    total_in_area = data.get("totalResultCount")
+    items = list(data.get("items") or [])
+    if isinstance(total_in_area, int) and 0 <= total_in_area < len(items):
+        items = items[:total_in_area]
+    urls: list[str] = []
+    for item in items:
+        if not (isinstance(item, list) and item and isinstance(item[0], int)):
+            continue
+        posting_id = min_posting_id + item[0]
+        if posting_id <= 0:
+            continue
+        if isinstance(first_nearby_id, int) and posting_id == first_nearby_id:
+            break
+        slug = "apt"
+        for element in item:
+            if (
+                isinstance(element, list)
+                and len(element) >= 2
+                and element[0] == 6
+                and isinstance(element[1], str)
+                and element[1]
+            ):
+                slug = element[1]
+                break
+        urls.append(f"https://newyork.craigslist.org/apa/d/{slug}/{posting_id}.html")
+    return unique_strings(urls)[:max_results]
 
 
 def parse_craigslist_detail(url: str, query_label: str) -> dict[str, Any]:
-    page = read_text_url(url)
+    page, final_url = read_text_url_final(url)
+    # The constructed URL omits the borough subarea; craigslist redirects to the
+    # canonical URL, which is what the record (and borough inference) should carry.
+    url = final_url
     ld_posting = extract_ld_posting_data(page)
     ld_address = ld_posting.get("address") if isinstance(ld_posting.get("address"), dict) else {}
 
@@ -430,8 +510,93 @@ RH_DETAIL_URL_RE = re.compile(r'href="(https://www\.renthop\.com/listings/[^"]+)
 RH_LD_JSON_RE = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
 
 
+STREETEASY_FLIGHT_PUSH_RE = re.compile(
+    r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\s*\]\)', re.S
+)
+STREETEASY_FLIGHT_CHUNK_RE = re.compile(r"(?:^|\n)([0-9a-fA-F]{1,4}):")
+
+
+def _streeteasy_flight_stream(page_html: str) -> str:
+    """Reassemble StreetEasy's Next.js React Flight stream from its script segments.
+
+    Chunks can be split mid-JSON across consecutive self.__next_f.push() calls, so the
+    string payloads must be concatenated in document order before chunk parsing.
+    """
+    segments = STREETEASY_FLIGHT_PUSH_RE.findall(page_html)
+    decoded: list[str] = []
+    for segment in segments:
+        try:
+            decoded.append(json.loads(f'"{segment}"'))
+        except json.JSONDecodeError:
+            # Manual unescape; \x00 placeholder keeps escaped backslashes intact.
+            cleaned = segment.replace("\\\\", "\x00").replace('\\"', '"').replace("\\n", "\n")
+            decoded.append(cleaned.replace("\x00", "\\"))
+    return "".join(decoded)
+
+
+def _resolve_flight_ref(value: Any, chunks: dict[str, Any], depth: int = 0) -> Any:
+    """Resolve React Flight "$<chunk-id>" references against the chunk map."""
+    if depth > 4:
+        return value
+    if isinstance(value, str) and value.startswith("$"):
+        key = value[1:]
+        if key[:1] in {"L", "@"}:
+            key = key[1:]
+        if key in chunks:
+            return _resolve_flight_ref(chunks[key], chunks, depth + 1)
+        return value
+    if isinstance(value, list):
+        return [_resolve_flight_ref(entry, chunks, depth + 1) for entry in value]
+    return value
+
+
 def extract_streeteasy_nodes(page_html: str) -> list[dict[str, Any]]:
-    """Extract listing nodes from StreetEasy embedded JSON state."""
+    """Extract listing nodes from StreetEasy's embedded search state.
+
+    2026-07: search results moved into the Next.js React Flight stream. listingData's
+    "edges" now holds only a "$<id>" reference; each edge wrapper and listing node is
+    its own numbered flight chunk (node field names are unchanged). Parse the chunk
+    map, take every edge-wrapper chunk, and resolve node/geoPoint/photos references.
+    Falls back to the pre-2026-07 inline "edges":[{"node":{...}}] blob format.
+    """
+    stream = _streeteasy_flight_stream(page_html)
+    if stream:
+        chunks: dict[str, Any] = {}
+        boundaries = list(STREETEASY_FLIGHT_CHUNK_RE.finditer(stream))
+        for index, boundary in enumerate(boundaries):
+            end = boundaries[index + 1].start() if index + 1 < len(boundaries) else len(stream)
+            body = stream[boundary.end() : end].strip()
+            if not body or body[0] not in "{[":
+                continue
+            try:
+                chunks[boundary.group(1)] = json.loads(body)
+            except json.JSONDecodeError:
+                continue
+
+        nodes: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for chunk in chunks.values():
+            if not (
+                isinstance(chunk, dict)
+                and "node" in chunk
+                and str(chunk.get("__typename") or "").endswith("Edge")
+            ):
+                continue
+            node = _resolve_flight_ref(chunk["node"], chunks)
+            if not (isinstance(node, dict) and node.get("id") is not None and "urlPath" in node):
+                continue
+            node = dict(node)
+            node["geoPoint"] = _resolve_flight_ref(node.get("geoPoint"), chunks)
+            node["photos"] = _resolve_flight_ref(node.get("photos"), chunks)
+            node_id = str(node.get("id"))
+            if node_id in seen_ids:
+                continue
+            seen_ids.add(node_id)
+            nodes.append(node)
+        if nodes:
+            return nodes
+
+    # Legacy fallback: inline "edges":[{"node":{...}}] blob (pre-2026-07 markup).
     idx = page_html.find("listingData")
     if idx < 0:
         return []
@@ -441,7 +606,7 @@ def extract_streeteasy_nodes(page_html: str) -> list[dict[str, Any]]:
     if edges_start < 0:
         return []
     data_str = unescaped[edges_start + 9:]
-    nodes: list[dict[str, Any]] = []
+    nodes = []
     pos = 0
     while pos < len(data_str) and len(nodes) < 100:
         node_start = data_str.find('{"node":{', pos)
@@ -926,7 +1091,7 @@ def discover_craigslist_live(
             if not listing_id:
                 continue
 
-            borough_code_match = re.search(r"newyork\.craigslist\.org/([a-z]{3})/", url)
+            borough_code_match = re.search(r"newyork\.craigslist\.org/(mnh|brk|que|brx|stn)/", url)
             borough_code = borough_code_match.group(1) if borough_code_match else None
             if allowed_codes and borough_code and borough_code not in allowed_codes:
                 continue
@@ -959,6 +1124,15 @@ def discover_craigslist_live(
             if query_label not in record["query_terms"]:
                 record["query_terms"].append(query_label)
             record.setdefault("neighborhood_hint", query_label)
+
+            # Post-fetch borough filter: sapi-era search URLs carry no subarea, so the
+            # borough is only known after the detail fetch resolves the canonical URL.
+            record_url = str(record.get("url") or url)
+            if "craigslist.org" in record_url and "newyork.craigslist.org" not in record_url:
+                continue  # posting redirected to another craigslist area entirely
+            record_code = BOROUGH_NAME_TO_SITE.get(str(record.get("borough") or "").strip().lower())
+            if allowed_codes and record_code and record_code not in allowed_codes:
+                continue
 
             lowered_blob = f"{record.get('title', '')} {record.get('body', '')}".lower()
             price = record.get("price")
