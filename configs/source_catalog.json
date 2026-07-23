@@ -321,7 +321,7 @@
         "borough:bronx"
       ],
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/openigloo",
-      "notes": "2026-07-23: rebuilt after the June adapter was lost with ~/Projects. openigloo is a building-review platform (tenants rate landlords) \u2014 aligned with the private-landlord mission. Server-rendered unit cards carry address/price/beds/baths/neighborhood/photos, so discovery is one request per borough with no detail fetches. Filter syntax: /listings/borough:<b>|price:-<max>."
+      "notes": "2026-07-23: rebuilt after the June adapter was lost with ~/Projects. openigloo is a building-review platform (tenants rate landlords) \u2014 aligned with the private-landlord mission. Server-rendered unit cards carry address/price/beds/baths/neighborhood/photos, so discovery is one request per borough with no detail fetches. Filter syntax: /listings/borough:<b>|price:-<max>. VERIFIED 2026-07-23: the site's nbr:<slug> filter is NOT reliable for scoping \u2014 nbr:alphabet-city returns Washington Heights/Inwood/East Harlem, and most target-neighborhood slugs return 0 even though the slug vocabulary is valid. So query borough-wide and let VERA's own neighborhood filter scope it; do not re-attempt nbr: scoping. Records outside the target neighborhoods correctly skip at the hard-filter stage."
     }
   ]
 }
