@@ -2104,8 +2104,257 @@ def discover_spareroom_live(
 # Source adapter dispatch
 # ---------------------------------------------------------------------------
 
+OI_CARD_RE = re.compile(
+    r'data-analytics-event="listings_unitcard"\s+data-analytics-props="([^"]+)"\s+href="([^"]+)"(.*?)</a>',
+    re.S,
+)
+OI_TEXT_TAG_RE = re.compile(r"<[^>]+>")
+OI_PRICE_RE = re.compile(r"\$([0-9][0-9,]{2,})")
+# "3 beds" / "1 bed" / bare "Studio" (openigloo writes studios without a "bed" word).
+OI_BEDS_RE = re.compile(r"(?:(\d+(?:\.\d+)?)\s*beds?|\b(studio)\b)", re.I)
+OI_BATHS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*baths?", re.I)
+OI_IMG_RE = re.compile(r'src="(/_next/image\?url=[^"]+)"')
+OI_RATING_RE = re.compile(r"(\d\.\d)\s*\(\s*(\d+)\s*\)")
+# Badge chips openigloo prints ahead of the neighborhood name.
+OI_BADGES = ("Verified", "Rent-stabilized", "Good cause", "Future", "New")
+# addressSlug: <borough>-<neighborhood-words>-<street address>-<zip>-<unit>
+OI_SLUG_ZIP_RE = re.compile(r"-(\d{5})(?:-|$)")
+
+
+def _oi_card_text(fragment: str) -> str:
+    return html.unescape(OI_TEXT_TAG_RE.sub(" ", fragment))
+
+
+def parse_openigloo_card(props_raw: str, href: str, fragment: str, query_label: str) -> dict[str, Any] | None:
+    """Build a raw record from one openigloo search-result unit card.
+
+    openigloo server-renders every field VERA needs onto the card itself
+    (address, price, beds/baths, neighborhood, photos), so discovery costs
+    one request per query — no detail fetch per listing.
+    """
+    try:
+        props = json.loads(html.unescape(props_raw))
+    except json.JSONDecodeError:
+        return None
+    listing_id = str(props.get("unitId") or props.get("id") or "").strip()
+    if not listing_id:
+        return None
+
+    # Card text reads:
+    #   "<badges> <Neighborhood> · <N beds, N baths> [<rating> ( <reviews> )] <address> $<was> $<now>"
+    # Two prices means a price drop (original struck through, current second).
+    text = _oi_card_text(fragment)
+    text = re.sub(r"\s+", " ", text).strip().lstrip("> ").strip()
+    prices = [int(p.replace(",", "")) for p in OI_PRICE_RE.findall(text)]
+    if not prices:
+        return None
+    price = prices[-1]
+    previous_price = prices[0] if len(prices) > 1 and prices[0] != price else None
+
+    address_slug = str(props.get("addressSlug") or "")
+    borough_slug = address_slug.split("-")[0] if address_slug else ""
+    zip_match = OI_SLUG_ZIP_RE.search(address_slug)
+
+    badges = [b for b in OI_BADGES if re.search(rf"\b{re.escape(b)}\b", text, re.I)]
+
+    neighborhood = None
+    tail = text
+    if "·" in text:
+        head, tail = text.split("·", 1)
+        # Strip any badge words that precede the neighborhood name.
+        head_clean = head
+        for badge in OI_BADGES:
+            head_clean = re.sub(rf"\b{re.escape(badge)}\b", " ", head_clean, flags=re.I)
+        neighborhood = re.sub(r"\s+", " ", head_clean).strip(" ,-") or None
+
+    beds_match = OI_BEDS_RE.search(tail)
+    beds: float | None = None
+    if beds_match:
+        beds = 0.0 if beds_match.group(2) else float(beds_match.group(1))
+    baths_match = OI_BATHS_RE.search(tail)
+
+    # Building review score, openigloo's signature signal: "3.2 ( 3 )".
+    rating = review_count = None
+    rating_match = OI_RATING_RE.search(tail)
+    if rating_match:
+        rating = float(rating_match.group(1))
+        review_count = int(rating_match.group(2))
+
+    # Address = what's left after beds/baths and the rating, before the price.
+    address = None
+    after = tail[rating_match.end():] if rating_match else tail
+    if not rating_match:
+        bb_end = max(
+            beds_match.end() if beds_match else 0,
+            baths_match.end() if baths_match else 0,
+        )
+        after = tail[bb_end:]
+    address_match = re.match(r"\s*(.+?)\s*\$", after, re.S)
+    if address_match:
+        address = re.sub(r"\s+", " ", address_match.group(1)).strip() or None
+
+    images: list[str] = []
+    for src in OI_IMG_RE.findall(fragment):
+        decoded = html.unescape(src)
+        inner = re.search(r"url=([^&]+)", decoded)
+        if not inner:
+            continue
+        full = urllib.parse.unquote(inner.group(1))
+        if full not in images:
+            images.append(full)
+        if len(images) >= 6:
+            break
+
+    return {
+        "id": listing_id,
+        "source_listing_id": listing_id,
+        "url": urllib.parse.urljoin("https://www.openigloo.com", href),
+        "title": address or f"openigloo listing {listing_id[:8]}",
+        "map_address": address,
+        "price": price,
+        "bedrooms": beds,
+        "bathrooms": float(baths_match.group(1)) if baths_match else None,
+        "neighborhood_hint": neighborhood or query_label,
+        "borough": borough_slug.replace("_", " ").title() if borough_slug else None,
+        "postal_code": zip_match.group(1) if zip_match else None,
+        "image_urls": images,
+        "image_count": len(images),
+        "body": " ".join(
+            part
+            for part in [
+                "Listed on openigloo, where tenants rate the building and landlord.",
+                f"Building review score {rating}/5 from {review_count} tenant review(s)."
+                if rating is not None
+                else "No tenant reviews on file for this building yet.",
+                f"openigloo badges: {', '.join(badges)}." if badges else "",
+                f"Price dropped from ${previous_price:,} to ${price:,}." if previous_price else "",
+            ]
+            if part
+        ),
+        "amenities": badges or None,
+        "source_enrichment_notes": (
+            f"openigloo building rating {rating}/5 ({review_count} reviews)"
+            if rating is not None
+            else "openigloo listing with no building reviews yet"
+        ),
+        "rent_stabilized_hint": any(b.lower() == "rent-stabilized" for b in badges) or None,
+        "previous_price": previous_price,
+        "query_terms": [query_label],
+        "posted_at": None,
+    }
+
+
+def build_openigloo_searches(source: dict[str, Any], preferences: dict[str, Any]) -> list[dict[str, str]]:
+    """openigloo filter URLs: /listings/borough:<b>|nbr:<slug>|price:-<max>."""
+    max_rent = int(source.get("max_price") or preferences.get("max_rent") or 2500)
+    searches: list[dict[str, str]] = []
+    for term in source.get("query_terms") or []:
+        term = str(term).strip()
+        if not term:
+            continue
+        if ":" in term:
+            # Pre-built filter expression straight from the catalog.
+            filters = term
+            label = term
+        else:
+            filters = f"borough:{term.lower().replace(' ', '-')}"
+            label = term
+        url = (
+            "https://www.openigloo.com/listings/"
+            + urllib.parse.quote(f"{filters}|price:-{max_rent}", safe=":|-")
+        )
+        searches.append({"label": label, "url": url})
+    return searches
+
+
+def discover_openigloo_live(
+    source: dict[str, Any],
+    preferences: dict[str, Any],
+    manifest: dict[str, Any],
+    log_lines: list[str],
+) -> None:
+    """Discover listings from openigloo's server-rendered search results."""
+    source_name = source["source_name"]
+    output_dir = source_output_dir(source)
+    ensure_dir(output_dir)
+
+    request_delay_ms = int(source.get("request_delay_ms", 2000))
+    max_results_per_query = int(source.get("max_results_per_query", 20))
+    max_rent = int(source.get("max_price") or preferences.get("max_rent") or 2500)
+    searches = build_openigloo_searches(source, preferences)
+
+    records_by_id: dict[str, dict[str, Any]] = {}
+    query_summaries: list[dict[str, Any]] = []
+    fresh_fetches = 0
+
+    for search in searches:
+        query_label = search["label"]
+        query_url = search["url"]
+        try:
+            search_html = read_text_url(query_url)
+            fresh_fetches += 1
+        except Exception as exc:
+            query_summaries.append({"query": query_label, "status": "error", "error": str(exc), "result_count": 0})
+            log_lines.append(f"{source_name}: query '{query_label}' failed with {exc}")
+            continue
+
+        time.sleep(request_delay_ms / 1000)
+        kept_for_query = 0
+        for props_raw, href, fragment in OI_CARD_RE.findall(search_html):
+            if kept_for_query >= max_results_per_query:
+                break
+            record = parse_openigloo_card(props_raw, href, fragment, query_label)
+            if not record:
+                continue
+            price = record.get("price")
+            if isinstance(price, (int, float)) and price > max_rent:
+                continue
+            existing = records_by_id.get(record["id"])
+            if existing:
+                terms = existing.setdefault("query_terms", [])
+                if query_label not in terms:
+                    terms.append(query_label)
+                continue
+            records_by_id[record["id"]] = record
+            kept_for_query += 1
+
+        query_summaries.append({"query": query_label, "status": "ok", "result_count": kept_for_query, "search_url": query_url})
+        log_lines.append(f"{source_name}: query '{query_label}' kept {kept_for_query} listings")
+
+    records = list(records_by_id.values())
+    snapshot_payload = {
+        "source_name": source_name,
+        "captured_at": utc_now_iso(),
+        "parser_version": PARSER_VERSION,
+        "access_mode": source.get("access_mode"),
+        "record_count": len(records),
+        "records": records,
+        "query_summaries": query_summaries,
+        "cache_hits": 0,
+        "fresh_fetches": fresh_fetches,
+    }
+    snapshot_path = output_dir / f"{source_name}_snapshot_{RUN_STAMP}.json"
+    write_json(snapshot_path, snapshot_payload)
+
+    manifest["sources"].append({
+        "source_name": source_name,
+        "status": "ok",
+        "record_count": len(records),
+        "snapshot_path": str(snapshot_path),
+        "parser_version": PARSER_VERSION,
+        "cache_hits": 0,
+        "fresh_fetches": fresh_fetches,
+        "search_count": len(searches),
+    })
+    log_lines.append(
+        f"{source_name}: wrote {len(records)} live records to {snapshot_path} "
+        f"(searches: {len(searches)}, fresh fetches: {fresh_fetches})"
+    )
+
+
 SOURCE_ADAPTERS: dict[str, Any] = {
     "craigslist": lambda s, p, m, l: discover_craigslist_live(s, p, m, l),
+    "openigloo": lambda s, p, m, l: discover_openigloo_live(s, p, m, l),
     "streeteasy": lambda s, p, m, l: discover_streeteasy_live(s, p, m, l),
     "renthop": lambda s, p, m, l: discover_renthop_live(s, p, m, l),
     "leasebreak": lambda s, p, m, l: discover_leasebreak_live(s, p, m, l),

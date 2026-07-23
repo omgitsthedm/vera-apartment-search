@@ -300,6 +300,28 @@
       "search_mode": "permanent",
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/facebook_marketplace",
       "notes": "Login-gated. Cannot be scraped without authentication. Not feasible for automated local-only operation."
+    },
+    {
+      "source_name": "openigloo",
+      "enabled": true,
+      "access_mode": "live_html",
+      "status": "live",
+      "cadence": "daily",
+      "source_tier": "primary",
+      "source_class": "market",
+      "search_mode": "permanent",
+      "request_delay_ms": 2000,
+      "max_results_per_query": 20,
+      "cache_ttl_hours": 12,
+      "max_price": 2500,
+      "query_terms": [
+        "borough:manhattan",
+        "borough:brooklyn",
+        "borough:queens",
+        "borough:bronx"
+      ],
+      "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/openigloo",
+      "notes": "2026-07-23: rebuilt after the June adapter was lost with ~/Projects. openigloo is a building-review platform (tenants rate landlords) \u2014 aligned with the private-landlord mission. Server-rendered unit cards carry address/price/beds/baths/neighborhood/photos, so discovery is one request per borough with no detail fetches. Filter syntax: /listings/borough:<b>|price:-<max>."
     }
   ]
 }

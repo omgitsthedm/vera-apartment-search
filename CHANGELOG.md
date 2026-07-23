@@ -9,6 +9,15 @@ Component prefixes: **engine** · **dashboard** · **site** (littlefightnyc.com)
 
 ---
 
+## 1.1.0 — 2026-07-23 · "The Reviewed Building"
+
+### engine
+- **openigloo source rebuilt** (lost with the `~/Projects` copy in June, existed in no surviving code). Server-rendered unit cards carry everything VERA needs, so discovery costs one request per borough with zero detail fetches. Verification yield: **52 records** across Manhattan/Brooklyn/Queens/Bronx with 100% field coverage (address, zip, beds/baths, photos), two spot-checked against their live detail pages.
+- The rebuild captures openigloo's signature signal the old adapter never had: **tenant building-review scores** (25 of 52 rated), **rent-stabilized / good-cause / verified badges** (35 flagged), and **price-drop detection** from struck-through prices (11 found). These flow into the record body, amenities, and a rent-stabilization hint.
+- Groundwork: the StreetEasy React Flight parser was generalized (`_next_flight_stream` / `_next_flight_chunks`) for reuse across Next.js sources.
+
+---
+
 ## 1.0.3 — 2026-07-23 · "Right Borough"
 
 ### engine
