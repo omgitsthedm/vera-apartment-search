@@ -9,6 +9,14 @@ Component prefixes: **engine** · **dashboard** · **site** (littlefightnyc.com)
 
 ---
 
+## 1.0.1 — 2026-07-23 · "Wide Net"
+
+### engine
+- craigslist expanded city-wide: all five boroughs queried (was Manhattan+Brooklyn), 50 results/query — 228 records in verification (MN 49 / BK 50 / QN 48 / BX 50 / SI 31). Fixed a silent scope bug: `user_preferences.json` borough filter was overriding catalog discovery scope; catalog now defines the net, prefs only trim text-query noise.
+- Listing photos restored: full-size images extracted (thumbnail-free, deduped, capped at 6) — 87% coverage in verification; StreetEasy photos flow through the Flight parser; RentHop JSON-LD images confirmed wired.
+
+---
+
 ## 1.0.0 — 2026-07-23 · "Resurrection"
 
 The day VERA became a platform. Full audit → rebuild → public launch in one wave.
