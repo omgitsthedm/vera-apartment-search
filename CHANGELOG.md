@@ -9,6 +9,13 @@ Component prefixes: **engine** · **dashboard** · **site** (littlefightnyc.com)
 
 ---
 
+## 1.0.3 — 2026-07-23 · "Right Borough"
+
+### engine
+- Neighborhood labels corrected from the map, not the ad: when GeoSearch confidently resolves a building somewhere other than the listing's claimed neighborhood, the resolved place wins ("East Village" was being stamped on a Rosedale, Queens house because source hints echo the search query). Original hint preserved in `neighborhood_raw`; correction noted on the record.
+
+---
+
 ## 1.0.2 — 2026-07-23 · "Pictures or It Didn't Happen"
 
 ### engine

@@ -755,6 +755,24 @@ def _main_impl() -> int:
         dob_score = dob_risk_score(reference)
         record_status = verification_status(listing, reference, qualified)
         neighborhood_verified, neighborhood_verification_note = neighborhood_verified_by_map(listing, reference)
+        # Map beats hint: when GeoSearch confidently resolved the building
+        # somewhere else, the resolved place IS the display neighborhood —
+        # source hints routinely carry the search query's neighborhood
+        # ("East Village" stamped on a Rosedale, Queens house).
+        if neighborhood_verified is False and reference:
+            resolved_hood = reference.get("resolved_neighborhood")
+            resolved_borough = reference.get("borough_resolved")
+            match_conf = float(reference.get("geosearch_match_confidence") or 0)
+            if resolved_hood and match_conf >= 0.8:
+                listing["neighborhood_raw"] = listing.get("neighborhood_raw") or listing.get("neighborhood")
+                listing["neighborhood"] = resolved_hood
+                if resolved_borough:
+                    listing["borough"] = resolved_borough
+                neighborhood_verified = True
+                neighborhood_verification_note = (
+                    f"Neighborhood corrected to {resolved_hood} from the building's map record "
+                    f"(source listing said {listing.get('neighborhood_raw') or 'something else'})."
+                )
         move_in_cash, move_in_cash_note = move_in_cash_estimate(listing)
         rent_control_flag, rent_control_note = rent_control_candidate(reference, listing)
         unit_status, unit_status_note_text = unit_status_note(reference, record_status, listing)
