@@ -527,19 +527,20 @@ RH_DETAIL_URL_RE = re.compile(r'href="(https://www\.renthop\.com/listings/[^"]+)
 RH_LD_JSON_RE = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
 
 
-STREETEASY_FLIGHT_PUSH_RE = re.compile(
+NEXT_FLIGHT_PUSH_RE = re.compile(
     r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\s*\]\)', re.S
 )
-STREETEASY_FLIGHT_CHUNK_RE = re.compile(r"(?:^|\n)([0-9a-fA-F]{1,4}):")
+NEXT_FLIGHT_CHUNK_RE = re.compile(r"(?:^|\n)([0-9a-fA-F]{1,4}):")
 
 
-def _streeteasy_flight_stream(page_html: str) -> str:
-    """Reassemble StreetEasy's Next.js React Flight stream from its script segments.
+def _next_flight_stream(page_html: str) -> str:
+    """Reassemble a Next.js React Flight stream from its script segments.
 
-    Chunks can be split mid-JSON across consecutive self.__next_f.push() calls, so the
-    string payloads must be concatenated in document order before chunk parsing.
+    Used for StreetEasy and openigloo (both Next.js App Router sites). Chunks can be
+    split mid-JSON across consecutive self.__next_f.push() calls, so the string
+    payloads must be concatenated in document order before chunk parsing.
     """
-    segments = STREETEASY_FLIGHT_PUSH_RE.findall(page_html)
+    segments = NEXT_FLIGHT_PUSH_RE.findall(page_html)
     decoded: list[str] = []
     for segment in segments:
         try:
@@ -549,6 +550,22 @@ def _streeteasy_flight_stream(page_html: str) -> str:
             cleaned = segment.replace("\\\\", "\x00").replace('\\"', '"').replace("\\n", "\n")
             decoded.append(cleaned.replace("\x00", "\\"))
     return "".join(decoded)
+
+
+def _next_flight_chunks(stream: str) -> dict[str, Any]:
+    """Parse a reassembled flight stream into its JSON-parseable numbered chunks."""
+    chunks: dict[str, Any] = {}
+    boundaries = list(NEXT_FLIGHT_CHUNK_RE.finditer(stream))
+    for index, boundary in enumerate(boundaries):
+        end = boundaries[index + 1].start() if index + 1 < len(boundaries) else len(stream)
+        body = stream[boundary.end() : end].strip()
+        if not body or body[0] not in "{[":
+            continue
+        try:
+            chunks[boundary.group(1)] = json.loads(body)
+        except json.JSONDecodeError:
+            continue
+    return chunks
 
 
 def _resolve_flight_ref(value: Any, chunks: dict[str, Any], depth: int = 0) -> Any:
@@ -576,20 +593,9 @@ def extract_streeteasy_nodes(page_html: str) -> list[dict[str, Any]]:
     map, take every edge-wrapper chunk, and resolve node/geoPoint/photos references.
     Falls back to the pre-2026-07 inline "edges":[{"node":{...}}] blob format.
     """
-    stream = _streeteasy_flight_stream(page_html)
+    stream = _next_flight_stream(page_html)
     if stream:
-        chunks: dict[str, Any] = {}
-        boundaries = list(STREETEASY_FLIGHT_CHUNK_RE.finditer(stream))
-        for index, boundary in enumerate(boundaries):
-            end = boundaries[index + 1].start() if index + 1 < len(boundaries) else len(stream)
-            body = stream[boundary.end() : end].strip()
-            if not body or body[0] not in "{[":
-                continue
-            try:
-                chunks[boundary.group(1)] = json.loads(body)
-            except json.JSONDecodeError:
-                continue
-
+        chunks = _next_flight_chunks(stream)
         nodes: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
         for chunk in chunks.values():
