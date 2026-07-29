@@ -147,7 +147,7 @@ with open('$STATE_DIR/latest_run.json', 'w') as f:
 
   echo ""
   echo "================================================================"
-  echo "VERA NIGHTLY CYCLE OUTCOME: ${OUTCOME^^}"
+  echo "VERA NIGHTLY CYCLE OUTCOME: $(printf %s "$OUTCOME" | tr "[:lower:]" "[:upper:]")"
   echo "RUN_ID: $RUN_ID"
   echo "================================================================"
 } 2>&1 | tee -a "$LOG_PATH"

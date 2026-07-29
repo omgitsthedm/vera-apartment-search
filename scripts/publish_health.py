@@ -27,14 +27,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config.paths import (VERA_ROOT as ROOT, DASHBOARD_ROOT, DASHBOARD_DATA_DIR as SITE_DATA_ROOT,
     LEGACY_STATE_DIR as STATE_ROOT, LOG_DIR as LOG_ROOT, REPORT_DIR as REPORT_ROOT)
 
-LIVE_SITE_BASE = "https://nyc-apartment-search-vera.netlify.app"
-LIVE_DASHBOARD_URL = f"{LIVE_SITE_BASE}/data/dashboard.json"
+# The feed site deploy_netlify.sh actually targets. (The old value pointed
+# at nyc-apartment-search-vera.netlify.app — a retired site — which made
+# every post-publish verification fail against stale content.)
+LIVE_SITE_BASE = "https://vera-pipeline.netlify.app"
+# dashboard.json is private now; the deployed contract is public.json.
+LIVE_DASHBOARD_URL = f"{LIVE_SITE_BASE}/data/public.json"
 LIVE_HASH_URL = f"{LIVE_SITE_BASE}/data/content_hash.txt"
 
 PUBLISH_STATE_PATH = ROOT / ".publish_state.json"
 LAST_DEPLOYED_HASH_PATH = ROOT / ".last_deployed_hash"
 CONTENT_HASH_PATH = SITE_DATA_ROOT / "content_hash.txt"
-DASHBOARD_JSON_PATH = SITE_DATA_ROOT / "dashboard.json"
+DASHBOARD_JSON_PATH = SITE_DATA_ROOT.parent.parent / "private" / "data" / "dashboard.json"
 
 # Stale threshold: if local is newer than live by more than this many seconds,
 # flag it. 300s = 5 minutes — generous for Netlify CDN propagation.

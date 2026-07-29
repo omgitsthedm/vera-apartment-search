@@ -117,7 +117,7 @@ with open('$STATE_DIR/latest_run.json', 'w') as f:
 
   echo ""
   echo "================================================================"
-  echo "VERA DAILY CYCLE OUTCOME: ${OUTCOME^^}"
+  echo "VERA DAILY CYCLE OUTCOME: $(printf %s "$OUTCOME" | tr "[:lower:]" "[:upper:]")"
   echo "RUN_ID: $RUN_ID"
   echo "================================================================"
 
