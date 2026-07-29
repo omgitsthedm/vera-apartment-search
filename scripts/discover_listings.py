@@ -24,7 +24,7 @@ from config.anomaly_detector import check_source_anomalies
 from config.source_reliability import record_source_run
 
 RUN_STAMP = utc_stamp()
-PARSER_VERSION = "2026-07-23a"
+PARSER_VERSION = "2026-07-29a"
 
 # Per-source extraction strategy metadata.
 # strategy_used: primary extraction method for each source.
@@ -280,6 +280,36 @@ def listing_id_from_url(url: str) -> str | None:
     return match.group(1) if match else None
 
 
+# 2026-07-28: craigslist detail pages moved to www.craigslist.org/view/d/<slug>/<opaque-id>.
+# The opaque id is not the posting id and the URL carries no borough subarea, but the page's
+# ld_breadcrumb_data still links craigslist.org/area/newyork and craigslist.org/subarea/<code>.
+CRAIGSLIST_SUBAREA_RE = re.compile(r"craigslist\.org/(?:search/)?subarea/(mnh|brk|que|brx|stn)\b")
+CRAIGSLIST_VIEW_SLUG_RE = re.compile(r"craigslist\.org/view/d/([^/]+)/")
+
+
+def canonical_craigslist_url(requested_url: str, final_url: str, page: str) -> str:
+    """Return the borough-scoped newyork.craigslist.org detail URL for a posting.
+
+    Craigslist used to 301 /apa/d/<slug>/<id>.html to the canonical borough URL; as of
+    2026-07-28 it 301s to www.craigslist.org/view/d/<slug>/<opaque-id> instead. Rebuild
+    the historical URL from the search-side posting id plus the breadcrumb subarea so the
+    posting id, borough inference and downstream listing_uid stay stable. Fall back to the
+    redirect target when the page is not a recognizable NYC-borough posting -- the caller's
+    off-area filter then drops it, which is the correct outcome.
+    """
+    if "newyork.craigslist.org" in final_url and borough_from_craigslist_url(final_url):
+        return final_url
+    posting_id = listing_id_from_url(requested_url) or listing_id_from_url(final_url)
+    subarea_match = CRAIGSLIST_SUBAREA_RE.search(page)
+    slug_match = CRAIGSLIST_VIEW_SLUG_RE.search(final_url) or re.search(r"/apa/d/([^/]+)/", requested_url)
+    if not (posting_id and subarea_match and slug_match):
+        return final_url
+    return (
+        f"https://newyork.craigslist.org/{subarea_match.group(1)}/apa/d/"
+        f"{slug_match.group(1)}/{posting_id}.html"
+    )
+
+
 def infer_fee_status(title: str, body: str) -> str:
     lowered = f"{title} {body}".lower()
     if "no fee" in lowered or "no broker" in lowered or "no broker fee" in lowered:
@@ -436,9 +466,12 @@ def extract_listing_urls(search_body: str, max_results: int) -> list[str]:
 
 def parse_craigslist_detail(url: str, query_label: str) -> dict[str, Any]:
     page, final_url = read_text_url_final(url)
-    # The constructed URL omits the borough subarea; craigslist redirects to the
-    # canonical URL, which is what the record (and borough inference) should carry.
-    url = final_url
+    # 2026-07-28: craigslist stopped redirecting /apa/d/<slug>/<id>.html to the borough
+    # canonical URL and now serves www.craigslist.org/view/d/<slug>/<opaque-id>, which
+    # carries neither the numeric posting id nor the borough subarea. Rebuild the
+    # borough-scoped URL from the posting id plus the page's ld_breadcrumb_data so ids,
+    # borough inference and listing_uid stay stable across the migration.
+    url = canonical_craigslist_url(url, final_url, page)
     ld_posting = extract_ld_posting_data(page)
     ld_address = ld_posting.get("address") if isinstance(ld_posting.get("address"), dict) else {}
 
@@ -1093,6 +1126,7 @@ def discover_craigslist_live(
     records_by_id: dict[str, dict[str, Any]] = {}
     cache_hits = 0
     fresh_fetches = 0
+    off_canonical = 0
     query_summaries: list[dict[str, Any]] = []
 
     for search in searches:
@@ -1134,8 +1168,16 @@ def discover_craigslist_live(
                 continue
 
             cached_entry = cache.get(listing_id)
-            if isinstance(cached_entry, dict) and cache_is_fresh(cached_entry, cache_ttl_hours):
-                record = copy.deepcopy(cached_entry.get("record", {}))
+            cached_record = cached_entry.get("record") if isinstance(cached_entry, dict) else None
+            # Entries captured between 2026-07-28 and this fix hold the www/view URL with no
+            # posting id and no borough; treat them as stale so they are refetched instead of
+            # being served back and dropped by the off-area filter below.
+            if (
+                isinstance(cached_record, dict)
+                and cached_record.get("source_listing_id")
+                and cache_is_fresh(cached_entry, cache_ttl_hours)
+            ):
+                record = copy.deepcopy(cached_record)
                 cache_hits += 1
             else:
                 try:
@@ -1159,6 +1201,11 @@ def discover_craigslist_live(
             # borough is only known after the detail fetch resolves the canonical URL.
             record_url = str(record.get("url") or url)
             if "craigslist.org" in record_url and "newyork.craigslist.org" not in record_url:
+                # Either a genuinely off-area posting or a canonical-URL shape change that
+                # canonical_craigslist_url could not undo. Count the second case so a silent
+                # 100% drop shows up in the discovery log instead of just as record_count 0.
+                if "www.craigslist.org/view/" in record_url:
+                    off_canonical += 1
                 continue  # posting redirected to another craigslist area entirely
             record_code = BOROUGH_NAME_TO_SITE.get(str(record.get("borough") or "").strip().lower())
             if allowed_codes and record_code and record_code not in allowed_codes:
@@ -1183,6 +1230,12 @@ def discover_craigslist_live(
             }
         )
         log_lines.append(f"{source_name}: query '{query_label}' kept {kept_for_query} listings")
+
+    if off_canonical:
+        log_lines.append(
+            f"{source_name}: WARNING {off_canonical} listings dropped with an unresolved "
+            "www.craigslist.org/view/ canonical URL -- canonical_craigslist_url may need updating"
+        )
 
     records = sorted(
         records_by_id.values(),
