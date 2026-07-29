@@ -224,7 +224,9 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
     return {
         "new": sorted(new_rows, key=lambda item: item.get("overall_score", 0), reverse=True),
         "duplicate": duplicates,
-        "filtered_out": sorted(filtered_out, key=lambda item: item.get("overall_score", 0)),
+        # Best-first, like every other bucket. Ascending order meant any caller
+        # taking a head slice got the worst rejects and never saw the near-misses.
+        "filtered_out": sorted(filtered_out, key=lambda item: item.get("overall_score", 0), reverse=True),
         "needs_manual_review": sorted(manual_review, key=lambda item: item.get("overall_score", 0), reverse=True),
         "shortlisted": sorted(shortlisted, key=lambda item: item.get("overall_score", 0), reverse=True),
         "archived": sorted(archived, key=lambda item: item.get("last_seen_at") or "", reverse=True),
@@ -347,7 +349,28 @@ def build_snapshot() -> tuple[dict[str, Any], bool]:
         source_class = catalog_entry.get("source_class", "fallback")
         confidence = source.get("extraction_confidence")
         records_found = source.get("record_count", 0)
-        status = "healthy" if source.get("status") == "ok" else ("partial" if records_found > 0 else "broken")
+        # A source that was never contacted is not "broken". The old one-liner
+        # classified every skipped entry as broken purely because a skip carries
+        # no record_count — which labelled 9 deliberately-disabled sources as
+        # failures and, far worse, left craigslist green while it went 229 -> 0.
+        raw_status = source.get("status")
+        skip_reason = str(source.get("reason") or "").lower()
+        if raw_status == "skipped":
+            status = "disabled" if "disab" in skip_reason or "not_feasible" in skip_reason else "not_scheduled"
+        elif raw_status == "ok":
+            # Healthy unless this run collapsed against its own recent history.
+            prior = [t.get("records", 0) for t in all_trends.get(sname, [])[:-1] if t.get("status") == "ok"]
+            baseline = (sum(prior) / len(prior)) if prior else 0
+            if baseline >= 5 and records_found == 0:
+                status = "failing"      # produced nothing where it reliably produced records
+            elif baseline >= 20 and records_found < baseline * 0.4:
+                status = "degraded"     # still returning, but a long way down
+            else:
+                status = "healthy"
+        elif records_found > 0:
+            status = "partial"
+        else:
+            status = "failing"
 
         trends = all_trends.get(sname, [])
         rate = success_rate_from_trends(trends)
@@ -425,10 +448,18 @@ def build_snapshot() -> tuple[dict[str, Any], bool]:
             sh["recommended_actions"] = actions
         source_health_list.append(sh)
 
-    active_sources = len(source_health_list)
+    # "active" now means sources the pipeline actually tries to fetch, so the
+    # headline reads "5 of 10 scheduled sources healthy" instead of counting
+    # nine switched-off sources as part of the fleet.
+    SCHEDULED = ("healthy", "degraded", "partial", "failing")
+    scheduled_list = [s for s in source_health_list if s["status"] in SCHEDULED]
+    active_sources = len(scheduled_list)
     healthy_sources = sum(1 for s in source_health_list if s["status"] == "healthy")
-    partial_sources = sum(1 for s in source_health_list if s["status"] == "partial")
-    broken_sources = sum(1 for s in source_health_list if s["status"] == "broken")
+    partial_sources = sum(1 for s in source_health_list if s["status"] in ("partial", "degraded"))
+    # Keep the legacy key meaning "needs attention" — but only for sources that
+    # were supposed to run. Disabled and not-scheduled no longer inflate it.
+    broken_sources = sum(1 for s in source_health_list if s["status"] == "failing")
+    disabled_sources = sum(1 for s in source_health_list if s["status"] in ("disabled", "not_scheduled"))
 
     # Build source_health dict for listing confidence computation
     source_health_data = {
@@ -436,13 +467,20 @@ def build_snapshot() -> tuple[dict[str, Any], bool]:
         "healthy": healthy_sources,
         "partial": partial_sources,
         "broken": broken_sources,
+        "disabled": disabled_sources,
         "sources": source_health_list,
     }
 
     # Bucket listings with listing confidence scored per-record
     bucketed = bucketized_payload(scored_records, duplicate_rows, parse_failed_rows, history, source_health=source_health_data)
-    shortlist = bucketed["shortlisted"][:6]
-    reviewed_out = (bucketed["filtered_out"][:10] + bucketed["needs_manual_review"][:6])
+    # No caps. The dashboard's `pool` is built from shortlist + reviewed_out, so
+    # a [:10] here silently threw away 50 of 63 scored listings — and because
+    # filtered_out is sorted worst-first, the ten it kept were the 1.2-6.3 junk
+    # while every near-miss was discarded. Rejects carry their
+    # review_out_reason_code, which is exactly what makes "why was this skipped"
+    # answerable in the UI.
+    shortlist = bucketed["shortlisted"]
+    reviewed_out = (bucketed["filtered_out"] + bucketed["needs_manual_review"])
     risk_watch = sorted(
         [
             {

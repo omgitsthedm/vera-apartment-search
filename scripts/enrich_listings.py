@@ -986,7 +986,14 @@ def _main_impl() -> int:
             indent=2,
         )
     )
-    write_stage_end("enrich", "success")
+    # write_stage_end defaults both counts to 0 and writes them unconditionally,
+    # so omitting them here was actively overwriting the real numbers with zeros.
+    write_stage_end(
+        "enrich",
+        "success",
+        records_in=len(deduped_rows),
+        records_out=len(enriched_rows),
+    )
     return 0
 
 

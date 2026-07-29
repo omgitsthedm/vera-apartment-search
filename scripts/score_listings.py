@@ -1015,7 +1015,13 @@ def _main_impl() -> int:
             indent=2,
         )
     )
-    write_stage_end("score", "success")
+    # Same defaulting trap as enrich: omitted counts are written as hard zeros.
+    write_stage_end(
+        "score",
+        "success",
+        records_in=len(enriched_rows),
+        records_out=len(scored_rows),
+    )
     return 0
 
 
