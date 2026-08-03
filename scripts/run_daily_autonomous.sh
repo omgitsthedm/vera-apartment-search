@@ -89,6 +89,7 @@ with open('$STATE_DIR/latest_run.json', 'w') as f:
   if [ "$PIPELINE_OK" = "true" ] && [ "$PUBLISH_OK" = "true" ]; then
     OUTCOME="success"
     python3 "$ROOT/scripts/send_alerts.py" || echo "[WARN] full-fit email alert failed (non-fatal)"
+    python3 "$ROOT/scripts/record_price_history.py" || echo "[WARN] price history record failed (non-fatal)"
   elif [ "$PIPELINE_OK" = "true" ] && [ "$PUBLISH_OK" = "false" ]; then
     OUTCOME="pipeline_ok_publish_failed"
   else

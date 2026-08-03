@@ -120,6 +120,7 @@ with open('$STATE_DIR/latest_run.json', 'w') as f:
     python3 "$ROOT/scripts/notify_digest.py" || echo "[WARN] digest notification failed (non-fatal)"
     python3 "$ROOT/scripts/send_alerts.py" || echo "[WARN] full-fit email alert failed (non-fatal)"
     python3 "$ROOT/scripts/refresh_market_context.py" || echo "[WARN] market context refresh failed (non-fatal)"
+    python3 "$ROOT/scripts/record_price_history.py" || echo "[WARN] price history record failed (non-fatal)"
   elif [ "$PIPELINE_OK" = "true" ] && [ "$PUBLISH_OK" = "false" ]; then
     OUTCOME="pipeline_ok_publish_failed"
   else

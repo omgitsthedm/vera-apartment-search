@@ -179,6 +179,10 @@ def listing_sections(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: list[dict[str, Any]], parse_failed_rows: list[dict[str, Any]], history: dict[str, Any], source_health: dict[str, Any] | None = None) -> dict[str, list[dict[str, Any]]]:
+    # Price memory: recorded post-run by record_price_history.py, attached on
+    # the next compose. Gives every listing its price path and honest
+    # days-on-market (StreetEasy retired theirs; VERA keeps its own).
+    price_store = read_json(STATE_ROOT / "price_history.json", default={})
     shortlisted = []
     manual_review = []
     filtered_out = []
@@ -191,6 +195,16 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
         record["why_this_listing"] = format_why_this_listing(explanations)
         record["trust_strengths"] = explanations["strengths"]
         record["trust_caveats"] = explanations["caveats"]
+
+        ph = price_store.get(record.get("listing_uid") or "")
+        if ph and ph.get("points"):
+            record["price_history"] = ph["points"][-12:]
+            try:
+                from datetime import date as _date
+                first = _date.fromisoformat(ph["points"][0][0])
+                record["days_seen"] = max(0, (_date.today() - first).days)
+            except (ValueError, KeyError, IndexError):
+                pass
 
         enriched = {**record, "sections": listing_sections(record)}
         if record.get("state_bucket") == "new":
