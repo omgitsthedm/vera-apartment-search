@@ -194,6 +194,23 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
     # tell #13, now computed instead of merely taught.
     addr_store = read_json(durable_state / "address_history.json", default={})
 
+    # The real subway universe (MTA GTFS static, derived weekly). When
+    # present, every listing gets transit{} — station, ≈walk, true lines —
+    # so the client stops leaning on its 95-station fallback table.
+    gtfs_stations = read_json(durable_state / "transit_stations.json", default=[])
+    import math as _math
+
+    def _nearest_station(lat, lon):
+        best, best_d = None, 1e12
+        cos = _math.cos(lat * _math.pi / 180)
+        for s in gtfs_stations:
+            dy = (lat - s["lat"]) * 111320
+            dx = (lon - s["lon"]) * 111320 * cos
+            d = (dx * dx + dy * dy) ** 0.5
+            if d < best_d:
+                best, best_d = s, d
+        return best, best_d
+
     # In-run forensics over the full (pre-sanitize) records. Only COUNTS and
     # uid references reach the feed; the contacts themselves never do.
     from datetime import date as _date
@@ -276,6 +293,20 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
                     record["photo_clone_suspect"] = True
                 else:
                     photo_map.setdefault(_img, _ak2)
+
+        if gtfs_stations and record.get("latitude") is not None and record.get("longitude") is not None:
+            try:
+                _st, _d = _nearest_station(float(record["latitude"]), float(record["longitude"]))
+                if _st is not None and _d <= 2400:
+                    record["transit"] = {
+                        "station": _st["name"],
+                        # straight-line × 1.3 street detour at 80 m/min — approximate by construction
+                        "walk_mins": max(1, round(_d * 1.3 / 80)),
+                        "lines": [ln for ln in _st["lines"] if not ln.endswith("X")][:6] or _st["lines"][:6],
+                        "approx": True,
+                    }
+            except (TypeError, ValueError):
+                pass
 
         ph = price_store.get(record.get("listing_uid") or "")
         if ph and ph.get("points"):

@@ -63,6 +63,7 @@ with open('$STATE_DIR/latest_run.json', 'w') as f:
   PIPELINE_START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   if "$ROOT/scripts/run_weekly.sh"; then
     echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] pipeline step: SUCCESS"
+    python3 "$ROOT/scripts/refresh_transit_gtfs.py" || echo "[WARN] GTFS transit refresh failed (non-fatal)"
   else
     echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] pipeline step: FAILED (exit code: $?)"
     PIPELINE_OK=false
