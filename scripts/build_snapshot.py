@@ -278,6 +278,12 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
         if _reuse > 3:
             record["contact_reuse_count"] = _reuse
 
+        # voucher welcome — EXPLICIT statements only, never inferred (fair-
+        # housing value lives in the accuracy, not the coverage)
+        _txt = (str(record.get("description") or "") + " " + str(record.get("body") or "") + " " + str(record.get("title") or "")).lower()
+        if _txt and __import__("re").search(r"\b(vouchers?\s+(?:are\s+)?(?:welcome|accepted|ok)|section\s*8\s+(?:welcome|accepted|ok)|hasa\s+(?:ok|welcome|accepted)|cityfheps\s+(?:ok|welcome|accepted))\b", _txt):
+            record["voucher_signal"] = True
+
         # template descriptions and hotlink-identical photos across addresses
         _body = "".join(ch for ch in str(record.get("description") or record.get("body") or "").lower() if ch.isalnum())[:400]
         if len(_body) >= 200:
