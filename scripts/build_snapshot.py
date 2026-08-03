@@ -194,6 +194,7 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
     # tell #13, now computed instead of merely taught.
     addr_store = read_json(durable_state / "address_history.json", default={})
     photo_flags = read_json(durable_state / "photo_clone_flags.json", default={})
+    ai_flags = read_json(durable_state / "ai_photo_flags.json", default={})
 
     # The real subway universe (MTA GTFS static, derived weekly). When
     # present, every listing gets transit{} — station, ≈walk, true lines —
@@ -318,6 +319,13 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
         # perceptual-hash clones (refresh_photo_hashes.py) join the hotlink check
         if photo_flags.get(_uid2):
             record["photo_clone_suspect"] = True
+
+        # AI-photo read (detect_ai_photos.py, HF classifier) — probabilistic
+        # evidence only; deliberately outside the approved weight set
+        _ai = ai_flags.get(_uid2) or {}
+        if (_ai.get("prob_ai") or 0) >= 0.85:
+            record["ai_photo_suspect"] = True
+            record["ai_photo_probability"] = _ai["prob_ai"]
 
         # tells attached above — now let them count (approved 2026-08-03)
         apply_forensic_deductions(record)

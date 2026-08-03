@@ -57,10 +57,20 @@ jobs:
           python-version: "3.12"
       - name: Deps
         run: pip install --quiet pillow certifi
+      - name: HF model cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-ai-image-detector-v1
+      - name: AI-photo deps (CPU wheels)
+        run: pip install --quiet transformers "torch>=2" --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
       - name: Full pipeline, cloud mode
         env:
           VERA_CLOUD: "1"
         run: bash scripts/run_daily.sh
+      - name: AI-photo pass (probabilistic, HF)
+        if: always()
+        run: python3 scripts/detect_ai_photos.py || echo "[WARN] ai-photo pass failed (non-fatal)"
       - name: Report the net
         if: always()
         run: |
