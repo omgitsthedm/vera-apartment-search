@@ -1,0 +1,7 @@
+{
+  "imap_host": "imap.gmail.com",
+  "email": "YOUR_GMAIL_ADDRESS",
+  "app_password": "16_CHAR_GOOGLE_APP_PASSWORD",
+  "folder": "INBOX",
+  "senders": ["notifications@streeteasy.com", "convo@zillow.com"]
+}

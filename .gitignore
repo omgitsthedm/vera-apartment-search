@@ -50,3 +50,7 @@ configs/notify.json
 
 # Alert send-state (regenerated; one email per listing ever)
 alerts/
+
+# Credential configs — real files never committed
+configs/reddit.json
+configs/mail_ingest.json
