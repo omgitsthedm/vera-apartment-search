@@ -1,6 +1,6 @@
-# DRAFT — Option A staging for the computer-off mandate (Handoff v2 §3).
-# NO CRON ON PURPOSE: schedule changes require David's authorization
-# (AGENTS.md). This runs only on manual dispatch until David picks A/B/C.
+# Option A — ACTIVE (approved by David 2026-08-03, "I approve of all of it").
+# The sanctioned half runs in the cloud daily; residential-IP sources stay
+# on the Mac. Cloud publish joins once David adds the Netlify secrets.
 #
 # Scope: the SANCTIONED half only — official CSVs and GTFS, which probe
 # clean from datacenter IPs. Residential-IP sources (Craigslist 403,
@@ -13,12 +13,12 @@
 #      later VERA_IMAP_* (ingestion)
 #   3. teach the Mac sweep to merge cloud-produced context instead of
 #      refetching it
-name: sanctioned-cloud-sweep (draft)
+name: sanctioned-cloud-sweep
 
 on:
   workflow_dispatch: {}
-  # schedule:
-  #   - cron: "30 5 * * *"   # ← activation is David's call
+  schedule:
+    - cron: "30 5 * * *"   # 05:30 UTC — ahead of the Mac's 06:00 sweep
 
 jobs:
   sanctioned:
