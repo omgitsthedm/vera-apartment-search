@@ -73,6 +73,9 @@ fi
 
 if command -v netlify >/dev/null 2>&1; then
   passes+=("netlify available")
+elif [[ "${VERA_CLOUD:-}" == "1" ]]; then
+  # Cloud discovery doesn't publish (yet); the CLI is a publish-time need.
+  passes+=("netlify absent (optional — cloud discovery mode)")
 else
   failures+=("netlify missing from PATH")
 fi
