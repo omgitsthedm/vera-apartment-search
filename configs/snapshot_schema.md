@@ -298,3 +298,29 @@ Changes to this schema should:
 1. Update the version at the top of this file
 2. Be backwards-compatible (add fields, don't remove or rename)
 3. Update the frontend to handle missing fields gracefully (always use `?.` and fallbacks)
+
+## Contract additions — 2026-08-03 (Phases 1–5 of the iteration program)
+
+Per-listing fields (attach in `build_snapshot.bucketized_payload`; all optional — consumers must feature-detect):
+
+| Field | Type | Source | Meaning |
+|---|---|---|---|
+| `price_history` | `[[iso_date, rent_int], …]` (≤12) | `state/price_history.json` (record_price_history.py) | VERA's own asking-price path; a relist cannot reset it |
+| `days_seen` | int | derived from price_history | days since VERA first recorded this uid |
+| `relist_suspect` | bool | `state/address_history.json` | fresh uid at a known address ≥2d after its predecessor went dark, ≥21d into the address's ad life, rent within 3% |
+| `true_days_on_market` | int | address history | days since the ADDRESS first advertised, across uids |
+| `contact_reuse_count` | int (>3 only) | in-run forensics (pre-sanitize) | listings sharing this post's phone/email; the contact itself never publishes |
+| `desc_clone_of` | uid | in-run forensics | near-verbatim description template seen at a different address |
+| `photo_clone_suspect` | bool | in-run forensics | lead photo URL identical to a different address's (perceptual hash = v2) |
+| `transit` | `{station, walk_mins, lines[], approx:true}` | `state/transit_stations.json` (MTA GTFS static, weekly) | nearest of 496 real stations; straight-line ×1.3 @80m/min, approximate by construction |
+| `voucher_signal` | bool | in-run text match | EXPLICIT statements only ("vouchers welcome", "Section 8 accepted", "HASA ok", "CityFHEPS ok") — never inferred |
+
+Top-level feed additions (dashboard sync passthrough):
+
+| Field | Source | Meaning |
+|---|---|---|
+| `market_context` | `snapshots/market_context.json` (StreetEasy official CSVs, nightly) | city/borough/focus-hood median-ask + inventory series, 36 months |
+
+Sibling public file: `data/archive.json` (dashboard `make_public_data.maintain_archive`) — the receipts: one entry per day `{date, run_id, listings[≤8 slim]}`, computed with the emailer's full-fit gate over the already-sanitized pool, 60-day cap, never edited.
+
+Durable-store note: cross-run stores live in the engine's top-level `state/` (runners' STATE_DIR). `build_snapshot`'s `STATE_ROOT` is `cache/state` — pipeline scratch. Do not conflate them; the price-memory reader was silently dead for half a day because of exactly this.
