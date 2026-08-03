@@ -322,6 +322,29 @@
       ],
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/openigloo",
       "notes": "2026-07-23: rebuilt after the June adapter was lost with ~/Projects. openigloo is a building-review platform (tenants rate landlords) \u2014 aligned with the private-landlord mission. Server-rendered unit cards carry address/price/beds/baths/neighborhood/photos, so discovery is one request per borough with no detail fetches. Filter syntax: /listings/borough:<b>|price:-<max>. VERIFIED 2026-07-23: the site's nbr:<slug> filter is NOT reliable for scoping \u2014 nbr:alphabet-city returns Washington Heights/Inwood/East Harlem, and most target-neighborhood slugs return 0 even though the slug vocabulary is valid. So query borough-wide and let VERA's own neighborhood filter scope it; do not re-attempt nbr: scoping. Records outside the target neighborhoods correctly skip at the hard-filter stage."
+    },
+    {
+      "source_name": "reddit_nycapartments",
+      "enabled": true,
+      "access_mode": "manual_review",
+      "status": "live",
+      "cadence": "daily",
+      "source_tier": "unconventional_high",
+      "source_class": "community",
+      "search_mode": "permanent",
+      "search_base_url": "https://www.reddit.com/r/NYCapartments/new.rss",
+      "subreddits": [
+        "NYCapartments"
+      ],
+      "alert_thresholds": {
+        "confidence_min": 0.35,
+        "drop_threshold_pct": 80
+      },
+      "request_delay_ms": 2000,
+      "max_results_per_query": 40,
+      "cache_ttl_hours": 24,
+      "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/reddit_nycapartments",
+      "notes": "Atom feed only (JSON API 403s unauthenticated). Offer leads, not listings: filtered to posts with a price and unit keywords, seekers excluded. Expected to land in manual review; thread link is the contact surface."
     }
   ]
 }

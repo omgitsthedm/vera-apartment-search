@@ -39,6 +39,7 @@ SOURCE_STRATEGIES: dict[str, dict[str, Any]] = {
     "hdc_hpd_rerentals": {"strategy_used": "html_dom_selectors", "base_confidence": 0.50},
     "nooklyn": {"strategy_used": "html_dom_selectors", "base_confidence": 0.55},
     "listings_project": {"strategy_used": "html_text_heuristic", "base_confidence": 0.45},
+    "reddit_nycapartments": {"strategy_used": "atom_feed_leads", "base_confidence": 0.35},
     "spareroom": {"strategy_used": "html_dom_selectors", "base_confidence": 0.55},
 }
 
@@ -2177,6 +2178,124 @@ def discover_spareroom_live(
 
 
 # ---------------------------------------------------------------------------
+def discover_reddit_live(
+    source: dict[str, Any],
+    preferences: dict[str, Any],
+    manifest: dict[str, Any],
+    log_lines: list[str],
+) -> None:
+    """Discover by-owner offers from subreddit Atom feeds.
+
+    Reddit's JSON API 403s unauthenticated callers, but the .rss feeds still
+    serve (verified 2026-08-03). Posts are leads, not listings: the record
+    links to the thread, carries whatever price/hood the title gives up, and
+    is expected to land in manual review. Seeker posts are filtered out.
+    """
+    import xml.etree.ElementTree as ET
+
+    source_name = source["source_name"]
+    output_dir = source_output_dir(source)
+    ensure_dir(output_dir)
+
+    subreddits = source.get("subreddits") or ["NYCapartments"]
+    max_results = int(source.get("max_results_per_query", 40))
+    records: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    atom = "{http://www.w3.org/2005/Atom}"
+    seeker_re = re.compile(r"\b(looking|seeking|iso\b|wanted|advice|question|help|recommendation|recommend|rant|vent|warn|beware|buildings? that|apartments? that|anyone know|does anyone|should i|can i|how do)\b|\?\s*$", re.I)
+    offer_re = re.compile(r"\b(studio|1\s?br|1\s?bed|one\s?bed|2\s?br|2\s?bed|apartment|apt\b|unit|sublet|lease)\b", re.I)
+    hoods = [str(h) for h in (preferences.get("neighborhoods") or [])]
+
+    errors: list[str] = []
+    for sub in subreddits:
+        url = f"https://www.reddit.com/r/{sub}/new.rss?limit=50"
+        try:
+            feed_xml = read_text_url(url, timeout=30)
+            root = ET.fromstring(feed_xml)
+        except Exception as exc:
+            errors.append(f"r/{sub}: {exc}")
+            continue
+
+        for entry in root.findall(f"{atom}entry"):
+            if len(records) >= max_results:
+                break
+            title = (entry.findtext(f"{atom}title") or "").strip()
+            link_el = entry.find(f"{atom}link")
+            link = link_el.get("href") if link_el is not None else None
+            post_id = (entry.findtext(f"{atom}id") or "").split("/")[-1] or None
+            published = entry.findtext(f"{atom}published") or utc_now_iso()
+            content = html.unescape(re.sub(r"<[^>]+>", " ", entry.findtext(f"{atom}content") or ""))
+            content = re.sub(r"\s+", " ", content).strip()
+
+            if not title or not link or not post_id or post_id in seen_ids:
+                continue
+            if seeker_re.search(title):
+                continue
+            haystack = f"{title} {content[:600]}"
+            if not offer_re.search(haystack):
+                continue
+            price = extract_price(haystack, title)
+            if not price or price < 700 or price > 6500:
+                continue
+            seen_ids.add(post_id)
+
+            hood_hint = None
+            low = haystack.lower()
+            for h in hoods:
+                if h.lower() in low:
+                    hood_hint = h
+                    break
+
+            records.append({
+                "id": f"rd-{post_id}",
+                "url": link,
+                "title": title[:200],
+                "body": content[:2000],
+                "map_address": None,
+                "borough": None,
+                "neighborhood_hint": hood_hint,
+                "postal_code": None,
+                "price": price,
+                "bedrooms": None,
+                "bathrooms": None,
+                "sqft": None,
+                "fee_status": "unknown",
+                "contact_name": None,
+                "phone": None,
+                "email": None,
+                "pet_policy": None,
+                "amenities": [],
+                "image_urls": [],
+                "posted_at": published,
+                "lat": None,
+                "lon": None,
+                "source_listing_id": f"rd-{post_id}",
+                "source_search_mode": "permanent",
+                "curated_source": False,
+            })
+
+    snapshot_payload = {
+        "source_name": source_name,
+        "captured_at": utc_now_iso(),
+        "parser_version": PARSER_VERSION,
+        "access_mode": source.get("access_mode"),
+        "record_count": len(records),
+        "records": records,
+    }
+    snapshot_path = output_dir / f"{source_name}_snapshot_{RUN_STAMP}.json"
+    write_json(snapshot_path, snapshot_payload)
+    status = "ok" if records or not errors else "error"
+    manifest["sources"].append({
+        "source_name": source_name,
+        "status": status,
+        "record_count": len(records),
+        "snapshot_path": str(snapshot_path),
+        "parser_version": PARSER_VERSION,
+        **({"error": "; ".join(errors)[:300]} if errors else {}),
+    })
+    log_lines.append(f"{source_name}: wrote {len(records)} offer leads from {len(subreddits)} subreddit feed(s)" + (f"; errors: {'; '.join(errors)[:160]}" if errors else ""))
+
+
 # Source adapter dispatch
 # ---------------------------------------------------------------------------
 
@@ -2439,6 +2558,7 @@ SOURCE_ADAPTERS: dict[str, Any] = {
     "hdc_hpd_rerentals": lambda s, p, m, l: discover_hdc_hpd_rerentals(s, p, m, l),
     "nooklyn": lambda s, p, m, l: discover_nooklyn_live(s, p, m, l),
     "listings_project": lambda s, p, m, l: discover_listings_project(s, p, m, l),
+    "reddit_nycapartments": lambda s, p, m, l: discover_reddit_live(s, p, m, l),
     "spareroom": lambda s, p, m, l: discover_spareroom_live(s, p, m, l),
 }
 
