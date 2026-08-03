@@ -193,6 +193,7 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
     # first advertised, is a reset days-on-market counter — Scam School
     # tell #13, now computed instead of merely taught.
     addr_store = read_json(durable_state / "address_history.json", default={})
+    photo_flags = read_json(durable_state / "photo_clone_flags.json", default={})
 
     # The real subway universe (MTA GTFS static, derived weekly). When
     # present, every listing gets transit{} — station, ≈walk, true lines —
@@ -313,6 +314,10 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
                     }
             except (TypeError, ValueError):
                 pass
+
+        # perceptual-hash clones (refresh_photo_hashes.py) join the hotlink check
+        if photo_flags.get(_uid2):
+            record["photo_clone_suspect"] = True
 
         # tells attached above — now let them count (approved 2026-08-03)
         apply_forensic_deductions(record)
