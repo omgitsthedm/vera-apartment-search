@@ -24,6 +24,9 @@ check_path() {
 check_writable_dir() {
   local path="$1"
   local label="$2"
+  # Runtime dirs are gitignored, so cleanups can delete them; recreate
+  # before checking instead of failing the whole pipeline on a missing dir.
+  mkdir -p "$path" 2>/dev/null || true
   if [ -d "$path" ] && [ -w "$path" ]; then
     passes+=("$label writable")
   else
