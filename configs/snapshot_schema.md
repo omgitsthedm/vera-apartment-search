@@ -324,3 +324,14 @@ Top-level feed additions (dashboard sync passthrough):
 Sibling public file: `data/archive.json` (dashboard `make_public_data.maintain_archive`) — the receipts: one entry per day `{date, run_id, listings[≤8 slim]}`, computed with the emailer's full-fit gate over the already-sanitized pool, 60-day cap, never edited.
 
 Durable-store note: cross-run stores live in the engine's top-level `state/` (runners' STATE_DIR). `build_snapshot`'s `STATE_ROOT` is `cache/state` — pipeline scratch. Do not conflate them; the price-memory reader was silently dead for half a day because of exactly this.
+
+## Additions — 2026-08-03 evening (/goal round)
+
+| Field | Type | Source | Meaning |
+|---|---|---|---|
+| `ai_photo_suspect` | bool | `state/ai_photo_flags.json` (detect_ai_photos.py, HF classifier) | lead photo classifier-read as AI-generated at ≥0.85 — probabilistic, presented as such, NOT in confidence weights |
+| `ai_photo_probability` | float | same | the classifier score, printed on the tell |
+| `transit_tables` (top-level) | `{route: [[station, secs], …]}` | `state/transit_routes.json` (GTFS weekly) | scheduled stop sequences; the app quotes ride minutes from these |
+| `listing_confidence_notes` | [str] | apply_forensic_deductions | the named, approved deductions (−10/−15/−25/−20, cap −45) |
+
+Cloud contract: `VERA_CLOUD=1` skips `renthop`/`leasebreak`/`housing_connect` (datacenter-blocked, probed 2026-08-03) with manifest reason `cloud_blocked`.
