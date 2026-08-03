@@ -2720,6 +2720,12 @@ SOURCE_ADAPTERS: dict[str, Any] = {
 }
 
 
+# Sources that hard-block datacenter IPs (probed from a GitHub runner,
+# 2026-08-03: renthop 403, leasebreak 403, housing_connect 503). Under
+# VERA_CLOUD=1 these skip honestly instead of burning retries.
+CLOUD_BLOCKED_SOURCES = {"renthop", "leasebreak", "housing_connect"}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="VERA listing discovery")
     parser.add_argument(
@@ -2763,6 +2769,14 @@ def main() -> int:
                     "reason": "disabled",
                 })
                 log_lines.append(f"{source_name}: skipped because disabled")
+                continue
+            if os.environ.get("VERA_CLOUD") == "1" and source_name in CLOUD_BLOCKED_SOURCES:
+                manifest["sources"].append({
+                    "source_name": source_name,
+                    "status": "skipped",
+                    "reason": "cloud_blocked",
+                })
+                log_lines.append(f"{source_name}: skipped — hard-blocks datacenter IPs (cloud mode)")
                 continue
 
             # Cadence filtering: skip sources not matching requested cadence

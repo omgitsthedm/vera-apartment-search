@@ -42,3 +42,46 @@ jobs:
             state/transit_stations.json
             state/transit_routes.json
           retention-days: 7
+
+  # The decisive experiment (probe 2026-08-03 showed nearly every source
+  # serves datacenter IPs): the FULL pipeline in the cloud. Blocked sources
+  # skip honestly via VERA_CLOUD=1. Snapshot uploads as an artifact until
+  # David's Netlify secrets unlock cloud publish.
+  cloud-discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Deps
+        run: pip install --quiet pillow certifi
+      - name: Full pipeline, cloud mode
+        env:
+          VERA_CLOUD: "1"
+        run: bash scripts/run_daily.sh
+      - name: Report the net
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          p = pathlib.Path('snapshots/latest_snapshot.json')
+          if p.exists():
+              d = json.loads(p.read_text())
+              pool = (d.get('shortlist') or []) + (d.get('reviewed_out') or [])
+              srcs = {}
+              for l in pool:
+                  srcs[l.get('source_name') or '?'] = srcs.get(l.get('source_name') or '?', 0) + 1
+              print('CLOUD POOL:', len(pool), json.dumps(srcs))
+          else:
+              print('CLOUD POOL: no snapshot produced')
+          PY
+      - name: Upload cloud snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-snapshot
+          path: snapshots/latest_snapshot.json
+          retention-days: 7
+          if-no-files-found: ignore
