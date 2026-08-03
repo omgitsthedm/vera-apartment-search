@@ -1,0 +1,44 @@
+# DRAFT — Option A staging for the computer-off mandate (Handoff v2 §3).
+# NO CRON ON PURPOSE: schedule changes require David's authorization
+# (AGENTS.md). This runs only on manual dispatch until David picks A/B/C.
+#
+# Scope: the SANCTIONED half only — official CSVs and GTFS, which probe
+# clean from datacenter IPs. Residential-IP sources (Craigslist 403,
+# Housing Connect 503, anonymous Reddit 429) stay on the Mac; Task-8
+# email ingestion joins here once credentials exist (add IMAP secrets).
+#
+# To activate under Option A, David says the word and we:
+#   1. uncomment the cron
+#   2. add repo secrets: NETLIFY_AUTH_TOKEN + NETLIFY_SITE_ID (publish),
+#      later VERA_IMAP_* (ingestion)
+#   3. teach the Mac sweep to merge cloud-produced context instead of
+#      refetching it
+name: sanctioned-cloud-sweep (draft)
+
+on:
+  workflow_dispatch: {}
+  # schedule:
+  #   - cron: "30 5 * * *"   # ← activation is David's call
+
+jobs:
+  sanctioned:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Market context (StreetEasy official CSVs)
+        run: python3 scripts/refresh_market_context.py
+      - name: Transit universe (MTA GTFS static)
+        run: python3 scripts/refresh_transit_gtfs.py
+      - name: Upload produced context
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanctioned-context
+          path: |
+            snapshots/market_context.json
+            state/transit_stations.json
+            state/transit_routes.json
+          retention-days: 7
