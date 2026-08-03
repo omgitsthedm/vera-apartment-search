@@ -345,6 +345,26 @@
       "cache_ttl_hours": 24,
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/reddit_nycapartments",
       "notes": "Atom feed only (JSON API 403s unauthenticated). Offer leads, not listings: filtered to posts with a price and unit keywords, seekers excluded. Expected to land in manual review; thread link is the contact surface."
+    },
+    {
+      "source_name": "email_alerts",
+      "enabled": true,
+      "access_mode": "manual_review",
+      "status": "awaiting_credentials",
+      "cadence": "daily",
+      "source_tier": "sanctioned_high",
+      "source_class": "ingestion",
+      "search_mode": "permanent",
+      "search_base_url": "imap://configured-locally",
+      "alert_thresholds": {
+        "confidence_min": 0.5,
+        "drop_threshold_pct": 80
+      },
+      "request_delay_ms": 0,
+      "max_results_per_query": 40,
+      "cache_ttl_hours": 12,
+      "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/email_alerts",
+      "notes": "StreetEasy/Zillow saved-search alert emails over IMAP (ingest_mail_alerts.py). The ToS-safe firehose; clean skip until configs/mail_ingest.json is filled."
     }
   ]
 }

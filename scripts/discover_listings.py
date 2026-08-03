@@ -2178,6 +2178,122 @@ def discover_spareroom_live(
 
 
 # ---------------------------------------------------------------------------
+def discover_email_alerts(
+    source: dict[str, Any],
+    preferences: dict[str, Any],
+    manifest: dict[str, Any],
+    log_lines: list[str],
+) -> None:
+    """StreetEasy/Zillow saved-search alert emails → raw records.
+
+    The sanctioned firehose (scripts/ingest_mail_alerts.py). Without
+    configs/mail_ingest.json this is a clean skip, not a failure.
+    """
+    source_name = source["source_name"]
+    output_dir = source_output_dir(source)
+    ensure_dir(output_dir)
+
+    from ingest_mail_alerts import pull_alert_records
+    pulled, note = pull_alert_records(max_messages=int(source.get("max_results_per_query", 40)))
+
+    if note == "not_configured":
+        manifest["sources"].append({"source_name": source_name, "status": "skipped", "record_count": 0, "note": "configs/mail_ingest.json not filled"})
+        log_lines.append(f"{source_name}: skipped — mail credentials not configured")
+        return
+
+    records: list[dict[str, Any]] = []
+    for p in pulled:
+        records.append({
+            "id": p["id"],
+            "url": p["url"],
+            "title": p.get("title") or ("Saved-search alert: " + p["url"].split("/")[-1].replace("-", " ")[:80]),
+            "body": None,
+            "map_address": None,
+            "borough": None,
+            "neighborhood_hint": None,
+            "postal_code": None,
+            "price": p.get("price"),
+            "bedrooms": None,
+            "bathrooms": None,
+            "sqft": None,
+            "fee_status": "unknown",
+            "contact_name": None,
+            "phone": None,
+            "email": None,
+            "pet_policy": None,
+            "amenities": [],
+            "image_urls": [],
+            "posted_at": utc_now_iso(),
+            "lat": None,
+            "lon": None,
+            "source_listing_id": p["id"],
+            "source_search_mode": "permanent",
+            "curated_source": False,
+        })
+
+    snapshot_payload = {
+        "source_name": source_name,
+        "captured_at": utc_now_iso(),
+        "parser_version": PARSER_VERSION,
+        "access_mode": source.get("access_mode"),
+        "record_count": len(records),
+        "records": records,
+    }
+    snapshot_path = output_dir / f"{source_name}_snapshot_{RUN_STAMP}.json"
+    write_json(snapshot_path, snapshot_payload)
+    status = "ok" if note == "ok" else "error"
+    manifest["sources"].append({
+        "source_name": source_name,
+        "status": status,
+        "record_count": len(records),
+        "snapshot_path": str(snapshot_path),
+        "parser_version": PARSER_VERSION,
+        **({"error": note[:200]} if status == "error" else {}),
+    })
+    log_lines.append(f"{source_name}: {len(records)} alerted listings ({note})")
+
+
+def _reddit_oauth_entries(subreddits: list[str], max_per: int) -> list[dict[str, Any]] | None:
+    """Authenticated JSON entries when configs/reddit.json is filled; else None."""
+    import base64
+    import urllib.parse
+    cfg_path = CONFIG_ROOT / "reddit.json" if "CONFIG_ROOT" in globals() else None
+    try:
+        cfg = json.loads((Path(__file__).resolve().parent.parent / "configs" / "reddit.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if "PASTE" in json.dumps(cfg) or not cfg.get("client_secret"):
+        return None
+    try:
+        auth = base64.b64encode(f"{cfg['client_id']}:{cfg['client_secret']}".encode()).decode()
+        req = urllib.request.Request(
+            "https://www.reddit.com/api/v1/access_token",
+            data=urllib.parse.urlencode({"grant_type": "client_credentials"}).encode(),
+            headers={"Authorization": "Basic " + auth, "User-Agent": cfg.get("user_agent", "vera/1.0")},
+        )
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            token = json.loads(resp.read())["access_token"]
+        out: list[dict[str, Any]] = []
+        for sub in subreddits:
+            req2 = urllib.request.Request(
+                f"https://oauth.reddit.com/r/{sub}/new?limit={max_per}",
+                headers={"Authorization": "Bearer " + token, "User-Agent": cfg.get("user_agent", "vera/1.0")},
+            )
+            with urllib.request.urlopen(req2, timeout=20) as resp:
+                for child in json.loads(resp.read()).get("data", {}).get("children", []):
+                    d = child.get("data", {})
+                    out.append({
+                        "title": d.get("title") or "",
+                        "link": "https://www.reddit.com" + (d.get("permalink") or ""),
+                        "post_id": d.get("id"),
+                        "published": utc_now_iso(),
+                        "content": (d.get("selftext") or "")[:1200],
+                    })
+        return out
+    except Exception:
+        return None
+
+
 def discover_reddit_live(
     source: dict[str, Any],
     preferences: dict[str, Any],
@@ -2207,6 +2323,46 @@ def discover_reddit_live(
     hoods = [str(h) for h in (preferences.get("neighborhoods") or [])]
 
     errors: list[str] = []
+
+    # Authenticated JSON when configs/reddit.json is filled (Decision 4);
+    # anonymous Atom stays as the credential-free fallback. Same filters,
+    # same record shape — keep the two branches in lockstep.
+    oauth_entries = _reddit_oauth_entries(subreddits, 50)
+    if oauth_entries is not None:
+        for entry in oauth_entries:
+            if len(records) >= max_results:
+                break
+            title = entry["title"].strip()
+            link = entry["link"]
+            post_id = entry["post_id"]
+            content = re.sub(r"\s+", " ", entry["content"]).strip()
+            if not title or not link or not post_id or post_id in seen_ids:
+                continue
+            if seeker_re.search(title):
+                continue
+            haystack = f"{title} {content[:600]}"
+            if not offer_re.search(haystack):
+                continue
+            price = extract_price(haystack, title)
+            if not price or price < 700 or price > 6500:
+                continue
+            seen_ids.add(post_id)
+            hood_hint = None
+            low = haystack.lower()
+            for h in hoods:
+                if h.lower() in low:
+                    hood_hint = h
+                    break
+            records.append({
+                "id": f"rd-{post_id}", "url": link, "title": title[:200], "body": content[:2000],
+                "map_address": None, "borough": None, "neighborhood_hint": hood_hint, "postal_code": None,
+                "price": price, "bedrooms": None, "bathrooms": None, "sqft": None, "fee_status": "unknown",
+                "contact_name": None, "phone": None, "email": None, "pet_policy": None, "amenities": [],
+                "image_urls": [], "posted_at": entry["published"], "lat": None, "lon": None,
+                "source_listing_id": f"rd-{post_id}", "source_search_mode": "permanent", "curated_source": False,
+            })
+        subreddits = []  # OAuth handled everything; skip the Atom pass
+
     for sub in subreddits:
         url = f"https://www.reddit.com/r/{sub}/new.rss?limit=50"
         try:
@@ -2559,6 +2715,7 @@ SOURCE_ADAPTERS: dict[str, Any] = {
     "nooklyn": lambda s, p, m, l: discover_nooklyn_live(s, p, m, l),
     "listings_project": lambda s, p, m, l: discover_listings_project(s, p, m, l),
     "reddit_nycapartments": lambda s, p, m, l: discover_reddit_live(s, p, m, l),
+    "email_alerts": lambda s, p, m, l: discover_email_alerts(s, p, m, l),
     "spareroom": lambda s, p, m, l: discover_spareroom_live(s, p, m, l),
 }
 
