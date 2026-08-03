@@ -1,0 +1,22 @@
+# Reachability probe — which discovery sources work from datacenter IPs.
+# Dispatch-only diagnostic; results decide what joins the cloud sweep.
+name: source-probe
+on:
+  workflow_dispatch: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe discovery sources
+        run: |
+          probe() { code=$(curl -sL -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15" -m 20 -o /tmp/p -w "%{http_code}" "$2"); size=$(wc -c < /tmp/p); echo "$1: HTTP $code, ${size}b"; }
+          probe openigloo        "https://www.openigloo.com/listings"
+          probe listings_project "https://www.listingsproject.com/real-estate/new-york-city"
+          probe renthop          "https://www.renthop.com/search/nyc"
+          probe leasebreak       "https://www.leasebreak.com/listings"
+          probe nooklyn          "https://nooklyn.com/listings"
+          probe spareroom        "https://www.spareroom.com/rooms-for-rent/nyc"
+          probe nybits           "https://www.nybits.com/search"
+          probe reddit_rss       "https://www.reddit.com/r/NYCapartments/new.rss?limit=10"
+          probe craigslist_sapi  "https://sapi.craigslist.org/web/v8/postings/search/full?batch=3-0-360-0-0&cc=US&lang=en&searchPath=apa"
