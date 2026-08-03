@@ -1,5 +1,5 @@
 # PROPOSAL — feed the computed tells into listing confidence
-**Status: AWAITING DAVID'S SIGN-OFF. Not applied. (AGENTS.md: scoring weights need approval.)**
+**Status: APPROVED by David 2026-08-03 ("I approve of all of it") — APPLIED in config/listing_confidence.apply_forensic_deductions.**
 
 The Phase-1.3 forensics publish as evidence only. This proposal makes them
 count, as a new deduction inside `config/listing_confidence.py`'s penalty

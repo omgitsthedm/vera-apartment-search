@@ -244,6 +244,62 @@ def compute_listing_confidence(
     }
 
 
+# Forensic-tell deductions — APPROVED by David 2026-08-03
+# (docs/proposals/2026-08-03-forensic-weights.md). Applied after the tells
+# attach in build_snapshot, since they land later in the compose than the
+# base confidence pass. Combined cap −45: a listing tripping everything
+# keeps the other components' say.
+FORENSIC_WEIGHTS = {
+    "relist_suspect": (10, "relisted after disappearing — days-on-market counter reset"),
+    "contact_reuse": (15, "contact appears across multiple listings in the net"),
+    "desc_clone": (25, "description is a near-verbatim template of another address"),
+    "photo_clone": (20, "lead photo also appears at a different address"),
+}
+FORENSIC_CAP = 45
+
+
+def _band_of(score: int) -> str:
+    if score >= 75:
+        return "high"
+    if score >= 50:
+        return "medium"
+    if score >= 25:
+        return "low"
+    return "needs_review"
+
+
+def apply_forensic_deductions(listing: dict[str, Any]) -> None:
+    """Fold the computed scam tells into the listing's confidence, in place.
+
+    Mutates listing_confidence_score / _band and records the named reasons
+    in listing_confidence_notes so the ledger can cite exactly why.
+    """
+    score = listing.get("listing_confidence_score")
+    if score is None:
+        return
+    hits: list[dict[str, Any]] = []
+    if listing.get("relist_suspect"):
+        pts, why = FORENSIC_WEIGHTS["relist_suspect"]
+        hits.append({"points": pts, "reason": why})
+    if (listing.get("contact_reuse_count") or 0) > 3:
+        pts, why = FORENSIC_WEIGHTS["contact_reuse"]
+        hits.append({"points": pts, "reason": why + f" ({listing['contact_reuse_count']}×)"})
+    if listing.get("desc_clone_of"):
+        pts, why = FORENSIC_WEIGHTS["desc_clone"]
+        hits.append({"points": pts, "reason": why})
+    if listing.get("photo_clone_suspect"):
+        pts, why = FORENSIC_WEIGHTS["photo_clone"]
+        hits.append({"points": pts, "reason": why})
+    if not hits:
+        return
+    deduction = min(FORENSIC_CAP, sum(h["points"] for h in hits))
+    listing["listing_confidence_score"] = max(0, int(score) - deduction)
+    listing["listing_confidence_band"] = _band_of(listing["listing_confidence_score"])
+    listing["listing_confidence_notes"] = [
+        f"−{h['points']}: {h['reason']}" for h in hits
+    ] + ([f"(capped at −{FORENSIC_CAP})"] if sum(h["points"] for h in hits) > FORENSIC_CAP else [])
+
+
 def summarize_confidence_distribution(listings: list[dict[str, Any]]) -> dict[str, int]:
     """Count listings per confidence band."""
     counts = {"high": 0, "medium": 0, "low": 0, "needs_review": 0}
