@@ -182,7 +182,37 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
     # Price memory: recorded post-run by record_price_history.py, attached on
     # the next compose. Gives every listing its price path and honest
     # days-on-market (StreetEasy retired theirs; VERA keeps its own).
-    price_store = read_json(STATE_ROOT / "price_history.json", default={})
+    # NOTE: STATE_ROOT here is cache/state (pipeline scratch); the durable
+    # cross-run stores live in the engine's top-level state/ dir, where the
+    # runners' STATE_DIR and record_price_history.py write.
+    durable_state = STATE_ROOT.parents[1] / "state"
+    price_store = read_json(durable_state / "price_history.json", default={})
+
+    # Relist memory: per-address uid spans. A fresh uid at an address whose
+    # previous uid went dark ≥2 days earlier, ≥21 days after the address
+    # first advertised, is a reset days-on-market counter — Scam School
+    # tell #13, now computed instead of merely taught.
+    addr_store = read_json(durable_state / "address_history.json", default={})
+
+    # In-run forensics over the full (pre-sanitize) records. Only COUNTS and
+    # uid references reach the feed; the contacts themselves never do.
+    from datetime import date as _date
+    phone_map: dict[str, set] = {}
+    email_map: dict[str, set] = {}
+    desc_map: dict[str, str] = {}
+    photo_map: dict[str, str] = {}
+    _addr_of = {}
+    for _r in scored_records:
+        _uid = _r.get("listing_uid") or ""
+        _ak = " ".join(str(_r.get("address_normalized") or "").strip().lower().split())
+        _addr_of[_uid] = _ak
+        _ph = "".join(ch for ch in str(_r.get("contact_phone") or "") if ch.isdigit())[-10:]
+        if len(_ph) == 10:
+            phone_map.setdefault(_ph, set()).add(_uid)
+        _em = str(_r.get("contact_email") or "").strip().lower()
+        if "@" in _em:
+            email_map.setdefault(_em, set()).add(_uid)
+
     shortlisted = []
     manual_review = []
     filtered_out = []
@@ -195,6 +225,57 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
         record["why_this_listing"] = format_why_this_listing(explanations)
         record["trust_strengths"] = explanations["strengths"]
         record["trust_caveats"] = explanations["caveats"]
+
+        _uid2 = record.get("listing_uid") or ""
+        _ak2 = _addr_of.get(_uid2, "")
+
+        # relist detection against address memory
+        spans = addr_store.get(_ak2) or []
+        if _ak2 and len(spans) >= 2:
+            try:
+                mine = next((s for s in spans if s.get("uid") == _uid2), None)
+                others = [s for s in spans if s.get("uid") != _uid2]
+                if mine and others:
+                    oldest_first = min(_date.fromisoformat(s["first"]) for s in spans)
+                    my_first = _date.fromisoformat(mine["first"])
+                    prior_last = max(_date.fromisoformat(s["last"]) for s in others)
+                    my_rent = mine.get("rent")
+                    rent_close = any(
+                        s.get("rent") and my_rent and abs(s["rent"] - my_rent) / max(s["rent"], my_rent) <= 0.03
+                        for s in others
+                    )
+                    if rent_close and (my_first - prior_last).days >= 2 and (my_first - oldest_first).days > 21:
+                        record["relist_suspect"] = True
+                    record["true_days_on_market"] = max(0, (_date.today() - oldest_first).days)
+            except (ValueError, KeyError):
+                pass
+
+        # contact reuse (counts only — the contact itself never leaves)
+        _reuse = 0
+        _phn = "".join(ch for ch in str(record.get("contact_phone") or "") if ch.isdigit())[-10:]
+        if len(_phn) == 10:
+            _reuse = max(_reuse, len(phone_map.get(_phn, ())))
+        _eml = str(record.get("contact_email") or "").strip().lower()
+        if "@" in _eml:
+            _reuse = max(_reuse, len(email_map.get(_eml, ())))
+        if _reuse > 3:
+            record["contact_reuse_count"] = _reuse
+
+        # template descriptions and hotlink-identical photos across addresses
+        _body = "".join(ch for ch in str(record.get("description") or record.get("body") or "").lower() if ch.isalnum())[:400]
+        if len(_body) >= 200:
+            prev = desc_map.get(_body)
+            if prev and _addr_of.get(prev) != _ak2:
+                record["desc_clone_of"] = prev
+            else:
+                desc_map.setdefault(_body, _uid2)
+        for _img in (record.get("image_urls") or [])[:1]:
+            if isinstance(_img, str) and _img.startswith("https://"):
+                prev_ak = photo_map.get(_img)
+                if prev_ak is not None and prev_ak != _ak2:
+                    record["photo_clone_suspect"] = True
+                else:
+                    photo_map.setdefault(_img, _ak2)
 
         ph = price_store.get(record.get("listing_uid") or "")
         if ph and ph.get("points"):

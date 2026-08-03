@@ -17,7 +17,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SNAPSHOT = ROOT / "snapshots" / "latest_snapshot.json"
 STORE = ROOT / "state" / "price_history.json"
+ADDR_STORE = ROOT / "state" / "address_history.json"
 PRUNE_DAYS = 90
+
+
+def address_key(rec: dict) -> str | None:
+    """Unit-level identity that survives a relist under a fresh uid."""
+    a = str(rec.get("address_normalized") or "").strip().lower()
+    if not a:
+        return None
+    return " ".join(a.split())
 
 
 def read(path: Path, fallback):
@@ -58,6 +67,35 @@ def main() -> int:
         elif pts[-1][1] != round(float(rent)) and pts[-1][0] != today:
             pts.append([today, round(float(rent))])
             changed += 1
+
+    # Address history: the relist detector's memory. Per unit-level address
+    # key, every uid that has advertised it with first/last dates and rent —
+    # a fresh uid at a known address after a gap is a reset DOM counter.
+    addr = read(ADDR_STORE, {})
+    for rec in pool:
+        key = address_key(rec)
+        uid = rec["listing_uid"]
+        if not key:
+            continue
+        entry = addr.setdefault(key, [])
+        hit = next((x for x in entry if x.get("uid") == uid), None)
+        rent = rec.get("rent")
+        if hit:
+            hit["last"] = today
+            if isinstance(rent, (int, float)) and rent > 0:
+                hit["rent"] = round(float(rent))
+        else:
+            entry.append({
+                "uid": uid,
+                "first": today,
+                "last": today,
+                "rent": round(float(rent)) if isinstance(rent, (int, float)) and rent > 0 else None,
+            })
+    for key in list(addr.keys()):
+        addr[key] = [x for x in addr[key] if (datetime.now(timezone.utc).date() - datetime.fromisoformat(x.get("last", today)).date()).days <= 180]
+        if not addr[key]:
+            del addr[key]
+    ADDR_STORE.write_text(json.dumps(addr, separators=(",", ":"), sort_keys=True))
 
     kept = {}
     for uid, entry in store.items():
