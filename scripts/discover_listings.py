@@ -1980,66 +1980,89 @@ def discover_listings_project(
     output_dir = source_output_dir(source)
     ensure_dir(output_dir)
 
-    search_url = str(source.get("search_base_url") or "https://www.listingsproject.com")
+    # 2026-08: the marketing root has no listing markup at all — the SSR
+    # inventory lives at /real-estate/new-york-city (about 12 cards a page,
+    # each anchor repeated ~4 times). Cards carry price, an optional sublet
+    # date range, and "Neighborhood, Borough | Category" as bare text.
+    search_url = str(source.get("search_base_url") or "https://www.listingsproject.com/real-estate/new-york-city")
+    max_results = int(source.get("max_results_per_query", 30))
     records: list[dict[str, Any]] = []
+    seen_slugs: set[str] = set()
+    uuid_tail = re.compile(r"-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+    hood_re = re.compile(r"([A-Za-z][A-Za-z .'\-]{2,40}),\s*(Brooklyn|Manhattan|Queens|Bronx|Staten Island)\s*\|\s*([A-Za-z ]{3,40})")
 
-    try:
-        page_html = read_text_url(search_url, timeout=30)
-    except Exception as exc:
-        manifest["sources"].append({
-            "source_name": source_name,
-            "status": "error",
-            "error": str(exc),
-            "record_count": 0,
-        })
-        log_lines.append(f"{source_name}: page fetch failed (subscription may be required): {exc}")
-        return
+    for page_no in (1, 2, 3):
+        page_url = search_url if page_no == 1 else f"{search_url}?page={page_no}"
+        try:
+            page_html = read_text_url(page_url, timeout=30)
+        except Exception as exc:
+            if page_no == 1:
+                manifest["sources"].append({
+                    "source_name": source_name,
+                    "status": "error",
+                    "error": str(exc),
+                    "record_count": 0,
+                })
+                log_lines.append(f"{source_name}: page fetch failed: {exc}")
+                return
+            break
 
-    # Listings Project is primarily a newsletter. Public page has limited listings.
-    # Extract any visible listing blocks
-    listing_blocks = re.findall(r'<article[^>]*>(.*?)</article>', page_html, re.S | re.I)
-    if not listing_blocks:
-        listing_blocks = re.findall(r'<div[^>]+class="[^"]*listing[^"]*"[^>]*>(.*?)</div>', page_html, re.S | re.I)
+        for m in re.finditer(r'href="(/listings/([^"?#]+))"', page_html):
+            href, slug = m.group(1), m.group(2)
+            if slug in seen_slugs or len(records) >= max_results:
+                continue
+            seen_slugs.add(slug)
+            chunk = re.sub(r"<[^>]+>", " ", page_html[m.start():m.start() + 1400])
+            chunk = html.unescape(re.sub(r"\s+", " ", chunk))
 
-    for block in listing_blocks[:int(source.get("max_results_per_query", 10))]:
-        title_match = re.search(r"<h[23][^>]*>(.*?)</h[23]>", block, re.S)
-        if not title_match:
-            continue
-        title = clean_html_text(title_match.group(1))
-        body = clean_html_text(block, preserve_newlines=True)
-        price = extract_price(body, title)
-        address_lines = [line.strip() for line in body.splitlines() if line.strip()]
-        address = extract_address(address_lines, {})
-        listing_id = f"lp-{len(records)}-{RUN_STAMP}"
+            hood_m = hood_re.search(chunk)
+            category = (hood_m.group(3).strip().lower() if hood_m else "")
+            # The hunt wants whole rentals: skip sublets (day-priced, date-ranged),
+            # rooms, and workspaces — but keep them out loud in the log.
+            if "/day" in chunk or "sublet" in category or "workspace" in category or "room" in category:
+                continue
+            if category and "rent" not in category:
+                continue
+            # The category line can fall outside the parse window; the slug
+            # still names sublets, rooms, swaps, and workspaces reliably.
+            if re.search(r"\b(sublets?|workspaces?|swap|rooms?|roommate|office|share|art studios?|desk)\b", slug.replace("-", " ")):
+                continue
 
-        record = {
-            "id": listing_id,
-            "url": search_url,
-            "title": title,
-            "body": body[:2000],
-            "map_address": address,
-            "borough": None,
-            "neighborhood_hint": None,
-            "postal_code": None,
-            "price": price,
-            "bedrooms": None,
-            "bathrooms": None,
-            "sqft": None,
-            "fee_status": "unknown",
-            "contact_name": None,
-            "phone": extract_phone(body),
-            "email": extract_email(body),
-            "pet_policy": None,
-            "amenities": [],
-            "image_urls": [],
-            "posted_at": utc_now_iso(),
-            "lat": None,
-            "lon": None,
-            "source_listing_id": listing_id,
-            "source_search_mode": "permanent",
-            "curated_source": True,
-        }
-        records.append(record)
+            title = uuid_tail.sub("", slug)
+            title = re.sub(r"-\d[\d\-]*$", "", title).replace("-", " ").strip().capitalize()
+            price = extract_price(chunk, title)
+
+            record = {
+                "id": f"lp-{slug[:80]}",
+                "url": f"https://www.listingsproject.com{href}",
+                "title": title or "Listings Project rental",
+                "body": chunk[:2000],
+                "map_address": None,
+                "borough": hood_m.group(2) if hood_m else None,
+                "neighborhood_hint": hood_m.group(1).strip() if hood_m else None,
+                "postal_code": None,
+                "price": price,
+                "bedrooms": None,
+                "bathrooms": None,
+                "sqft": None,
+                "fee_status": "no_fee",
+                "contact_name": None,
+                "phone": None,
+                "email": None,
+                "pet_policy": None,
+                "amenities": [],
+                "image_urls": [],
+                "posted_at": utc_now_iso(),
+                "lat": None,
+                "lon": None,
+                "source_listing_id": f"lp-{slug[:80]}",
+                "source_search_mode": "permanent",
+                "curated_source": True,
+            }
+            records.append(record)
+
+        if len(records) >= max_results:
+            break
 
     snapshot_payload = {
         "source_name": source_name,

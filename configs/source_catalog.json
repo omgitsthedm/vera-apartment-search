@@ -185,13 +185,13 @@
       "source_tier": "unconventional_high",
       "source_class": "editorial",
       "search_mode": "permanent",
-      "search_base_url": "https://www.listingsproject.com",
+      "search_base_url": "https://www.listingsproject.com/real-estate/new-york-city",
       "alert_thresholds": {
         "confidence_min": 0.4,
         "drop_threshold_pct": 80
       },
       "request_delay_ms": 3000,
-      "max_results_per_query": 10,
+      "max_results_per_query": 30,
       "cache_ttl_hours": 168,
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/listings_project",
       "notes": "Curated human-signal source. Weekly email newsletter with screened listings. Subscription-based \u2014 cannot fully automate. Weekly cadence checks public page for any extractable listings; full review requires manual email parsing. Enrichment only when location/building evidence is strong."
