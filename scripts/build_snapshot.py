@@ -669,8 +669,14 @@ def build_snapshot() -> tuple[dict[str, Any], bool]:
     ]
 
     snapshot_status = "success" if not failure_reason else "degraded"
+
+    # Scheduled ride-time tables (MTA GTFS, derived weekly) — ~20KB that lets
+    # the app quote the timetable instead of inventing commute minutes.
+    transit_tables = read_json(ROOT / "state" / "transit_routes.json", default=None)
+
     payload = {
         "generated_at": utc_now_iso(),
+        "transit_tables": transit_tables,
         "app": {
             "name": "NYC Apartment Search",
             "subtitle": "VERA Ops Terminal",
