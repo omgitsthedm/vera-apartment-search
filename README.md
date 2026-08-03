@@ -1,7 +1,43 @@
-# VERA apartment-search engine
+# VERA — verified NYC apartment hunting
 
-Local-first NYC listing discovery, normalization, deduplication, enrichment, scoring, and reporting. The engine is scheduled with LaunchAgents and publishes a sanitized public snapshot through the separate dashboard checkout.
+**Every claim on the page survives the question "how do you know that?"**
 
-Canonical paths and production ownership are in `SOURCE_OF_TRUTH.md`. Safety and startup rules are in `AGENTS.md`.
+VERA is an open, verification-first engine for finding privately-owned
+NYC rentals — no brokers, no corporate landlords, no scams. It sweeps
+the fragmented channels where small landlords actually post, joins every
+listing against the city's own records, and publishes a curated daily
+drop of at most eight listings that clear every gate — with an honest
+public ledger of everything it passed on and why.
 
-Operational references are available on demand under `configs/`, `scripts/`, and `docs/`. Do not run the pipeline or publisher, change search/scoring policy, inspect private data, contact landlords, or submit applications without the appropriate authorization.
+**Live:** https://littlefightnyc.com/vera · the field manual and daily
+receipts are free at `/vera/manual/` and `/vera/archive/`.
+
+## What it computes (all cited or ≈-marked)
+- **Steward Grade** — does this owner fix things? A–E from HPD
+  violations, heat/hot-water complaints, bedbug filings, housing-court
+  history, DOB records. No data grades `?`, never an A.
+- **Scam forensics** — relist detection (a fresh posting can't reset the
+  true days-on-market), contact reuse across listings, template
+  descriptions, perceptual-hash photo clones, and an AI-photo classifier
+  read (Hugging Face, probabilistic on its face).
+- **The money, by law** — deposit and application-fee caps, FARE-Act
+  broker-fee rules, a cash-to-keys total on every listing.
+- **Ownership chain-of-proof** — deed → HPD registration → DOS entity →
+  portfolio, with links to walk it yourself.
+- **Honest commutes** — MTA GTFS stations and timetable-quoted ride
+  minutes. Nothing invented, everything ≈-marked.
+
+## What it refuses
+No accounts. No tracking. No urgency theater. No AI chat. No landlord
+contact, ever. No protected-class signals anywhere in scoring —
+see `/vera/corrections/` for the fair-housing statement and the
+owner correction channel.
+
+## Run it
+Python 3.12+, stdlib + Pillow. `scripts/run_daily.sh` runs the pipeline;
+GitHub Actions runs the cloud sweep daily (`.github/workflows/`). Feed
+contract: `configs/snapshot_schema.md`. Agent rules: `AGENTS.md`.
+
+Built by [Little Fight NYC](https://littlefightnyc.com). AGPL-3.0 intent
+for code; data derivations carry their sources' terms (MTA GTFS, NYC
+Open Data, StreetEasy public CSVs).
