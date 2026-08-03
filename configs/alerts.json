@@ -1,0 +1,11 @@
+{
+  "enabled": true,
+  "recipient": "info@afterhoursagenda.com",
+  "from_address": "info@afterhoursagenda.com",
+  "recommendations": ["pursue", "pursue cautiously"],
+  "min_overall_score": 60,
+  "min_listing_confidence": 60,
+  "max_hpd_risk": 65,
+  "max_dob_risk": 65,
+  "max_per_email": 5
+}

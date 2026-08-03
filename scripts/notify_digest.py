@@ -54,7 +54,7 @@ def build_message() -> tuple[str, str]:
         }.get(str(owner_type), str(owner_type))
         rent_txt = f" at ${rent:,.0f}" if isinstance(rent, (int, float)) else ""
         lines.append(f"Top: {addr}{rent_txt} ({owner_label}).")
-    lines.append("https://nyc-apartment-search-vera.netlify.app")
+    lines.append("https://littlefightnyc.com/vera/")
     return title, "\n".join(lines)
 
 

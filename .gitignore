@@ -47,3 +47,6 @@ build/
 
 # Personal notification topic (semi-secret)
 configs/notify.json
+
+# Alert send-state (regenerated; one email per listing ever)
+alerts/
