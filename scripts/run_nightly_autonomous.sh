@@ -34,30 +34,52 @@ fi
 
 mkdir -p "$ROOT/logs" "$STATE_DIR" "$GUARD_DIR"
 
-# Once-per-ET-date guard: launchd re-fires missed jobs on wake, and a manual
-# run may already have claimed tonight — never run the nightly cycle twice
-# for the same ET calendar date.
+# Once-per-ET-date guard: launchd re-fires missed jobs on wake, so the cycle
+# must not run twice for the same ET date. But the lock has to know WHO
+# claimed the date. A manual diagnostic at 06:50 used to claim the day and
+# silently cancel the real 23:00 sweep, leaving the published feed ~37 hours
+# stale with nothing in any log explaining why. A scheduled run now overrides
+# a manual claim exactly once; manual-over-manual and scheduled-over-scheduled
+# still skip, which is the double-fire protection this lock exists for.
 ET_DATE="$(TZ=America/New_York date +%Y-%m-%d)"
-if [[ -f "$GUARD_FILE" ]] && python3 - "$GUARD_FILE" "$ET_DATE" <<'PY'
+# Who is calling? launchd sets XPC_SERVICE_NAME to the JOB LABEL for its own
+# jobs (com.vera.apartment-search.nightly). Mere presence of the variable means
+# nothing — macOS also sets it for GUI-launched apps, so a shell inside one
+# reads as "application.com.anthropic...". Match the label prefix instead.
+# Detecting this way leaves the launchd plists untouched; an explicit
+# VERA_TRIGGER always wins if you need to force either reading.
+if [[ -z "${VERA_TRIGGER:-}" ]]; then
+  if [[ "${XPC_SERVICE_NAME:-}" == com.vera.* ]]; then VERA_TRIGGER="scheduled"; else VERA_TRIGGER="manual"; fi
+fi
+if [[ -f "$GUARD_FILE" ]] && python3 - "$GUARD_FILE" "$ET_DATE" "$VERA_TRIGGER" <<'PY'
 import json, sys
 try:
     with open(sys.argv[1]) as f:
         guard = json.load(f)
 except Exception:
     sys.exit(1)
-sys.exit(0 if guard.get("last_et_date") == sys.argv[2] else 1)
+same_date = guard.get("last_et_date") == sys.argv[2]
+if not same_date:
+    sys.exit(1)                      # different day — run
+claimed_by = guard.get("trigger", "manual")
+incoming = sys.argv[3]
+# the real sweep may take the slot back from a diagnostic, once
+if incoming == "scheduled" and claimed_by == "manual":
+    sys.exit(1)                      # run
+sys.exit(0)                          # skip
 PY
 then
-  echo "Nightly cycle already claimed for ET date ${ET_DATE}; skipping." | tee -a "$LOG_PATH"
+  echo "Nightly cycle already claimed for ET date ${ET_DATE} by a ${VERA_TRIGGER} run; skipping." | tee -a "$LOG_PATH"
   exit 0
 fi
-python3 - "$GUARD_FILE" "$ET_DATE" <<'PY'
+python3 - "$GUARD_FILE" "$ET_DATE" "$VERA_TRIGGER" <<'PY'
 import json, sys
 from datetime import datetime, timezone
 with open(sys.argv[1], "w") as f:
     json.dump({
         "cadence": "nightly",
         "last_et_date": sys.argv[2],
+        "trigger": sys.argv[3],
         "timezone": "America/New_York",
         "claimed_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }, f, indent=2)

@@ -1,6 +1,6 @@
 # The once-per-ET-date guard cancels the night's real sweep
 
-**Found:** 2026-08-04 · **Status:** diagnosed, fix NOT applied (schedule behaviour — David's call)
+**Found:** 2026-08-04 · **Status:** FIXED (option 1). The schedule itself is untouched — no plist edited, no timing changed; the real sweep simply stops being cancelled by a diagnostic.
 
 ## What happened
 
@@ -40,3 +40,25 @@ this morning's manual run".
 
 Any of the three is a small change. Doing none of them means every
 manual diagnostic silently costs a night.
+
+
+## What shipped
+
+Option 1. The guard now records `trigger: "manual" | "scheduled"`, and a
+scheduled run may reclaim the date from a manual one **once**. Manual
+over manual and scheduled over scheduled still skip, which is the
+double-fire protection the lock exists for. A legacy guard file with no
+`trigger` key reads as manual, so tonight's scheduled sweep reclaims the
+slot my morning diagnostic took.
+
+Trigger detection needs no plist change: launchd sets `XPC_SERVICE_NAME`
+to the **job label**, so the script matches `com.vera.*`. Presence alone
+would have been wrong — macOS sets that variable for GUI-launched apps
+too, and a shell inside one reads
+`application.com.anthropic.claudefordesktop...`, which is exactly what
+this environment reports. An explicit `VERA_TRIGGER` overrides either way.
+
+Verified across all seven guard cases and all four detection cases.
+Note: the launchd branch is proven by logic and proxy, not by spoofing —
+macOS aborts (SIGABRT, exit 134) any process that tries to *set*
+`XPC_SERVICE_NAME`. Reading it, which is all the script does, is fine.
