@@ -50,9 +50,9 @@ def ref(serious=0, heat=0, litig=0, viol=0, complaints=0, bedbug=0, units=0):
 
 
 def test_shipped_formula_unchanged() -> None:
-    os.environ.pop("VERA_HPD_CALIBRATED", None)
+    os.environ["VERA_HPD_CALIBRATED"] = "0"   # pin the legacy path
     m = load_enrich()
-    print("\nshipped formula (flag off) — must not drift:")
+    print("\nlegacy formula (explicitly pinned off) — kept for comparison:")
     check("no public record stays synthetic 50.0", m.hpd_risk_score(None) == 50.0, str(m.hpd_risk_score(None)))
     expect = round(min(100.0, 5 * 1.4 + 20 * 5.5 + 2 * 0.9 + 3 * 10.0), 1)
     got = m.hpd_risk_score(ref(serious=3, heat=2, viol=20, complaints=5))
@@ -60,14 +60,15 @@ def test_shipped_formula_unchanged() -> None:
     check("a clean building scores 0", m.hpd_risk_score(ref()) == 0.0, str(m.hpd_risk_score(ref())))
     # the saturation this suite exists to document
     zero_serious = m.hpd_risk_score(ref(serious=0, heat=5, viol=19, complaints=3))
-    check("KNOWN FLAW: zero serious violations still saturates at 100",
-          zero_serious == 100.0, f"{zero_serious} — see docs/proposals/hpd-risk-calibration.md")
+    check("legacy path still shows the saturation it was retired for",
+          zero_serious == 100.0, f"{zero_serious} — why hpd_calibrated is now on")
+    os.environ.pop("VERA_HPD_CALIBRATED", None)
 
 
 def test_calibrated_formula() -> None:
-    os.environ["VERA_HPD_CALIBRATED"] = "1"
+    os.environ.pop("VERA_HPD_CALIBRATED", None)   # rely on the config default
     m = load_enrich()
-    print("\ncalibrated formula (flag on) — must discriminate:")
+    print("\ncalibrated formula (now the default) — must discriminate:")
     try:
         clean = m.hpd_risk_score(ref(viol=1))
         keap = m.hpd_risk_score(ref(serious=2, viol=4))               # 2-unit owner-direct
@@ -89,6 +90,8 @@ def test_calibrated_formula() -> None:
               "per-unit maths blocked the best small lead and passed a 799-unit complex")
     finally:
         os.environ.pop("VERA_HPD_CALIBRATED", None)
+    check("calibrated is the standing default (configs/user_preferences.json)",
+          __import__("json").loads((ROOT / "configs" / "user_preferences.json").read_text()).get("hpd_calibrated") is True)
 
 
 def test_synthetic_risk_detection() -> None:

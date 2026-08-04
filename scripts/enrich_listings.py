@@ -401,8 +401,13 @@ def load_watchlist_set(rows: list[dict[str, Any]], key: str) -> dict[str, dict[s
 # Evidence and reasoning: docs/proposals/hpd-risk-calibration.md
 def _hpd_calibrated_enabled() -> bool:
     import os
-    if os.environ.get("VERA_HPD_CALIBRATED") == "1":
+    # The env var is authoritative in both directions so a test (or a one-off
+    # comparison run) can pin either formula regardless of what the config says.
+    env = os.environ.get("VERA_HPD_CALIBRATED")
+    if env == "1":
         return True
+    if env == "0":
+        return False
     try:
         prefs = read_json(CONFIG_ROOT / "user_preferences.json", default={}) or {}
         return bool(prefs.get("hpd_calibrated"))
