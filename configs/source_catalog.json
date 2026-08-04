@@ -344,7 +344,17 @@
       "max_results_per_query": 40,
       "cache_ttl_hours": 24,
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/reddit_nycapartments",
-      "notes": "Atom feed only (JSON API 403s unauthenticated). Offer leads, not listings: filtered to posts with a price and unit keywords, seekers excluded. Expected to land in manual review; thread link is the contact surface."
+      "notes": "Anonymous RSS only, and heavily rate-limited: on 2026-08-04 a limit=25 request returned 1 entry and every other NYC subreddit returned 0 from this IP. Yield (~15/sweep) is therefore a floor set by throttling, not by what Reddit holds. Widening to more subreddits is deliberately NOT done until configs/reddit.json exists \u2014 the authenticated API lifts the limit and lets each subreddit's real yield be measured instead of guessed. Adding unverified subreddits now would recreate the green-but-empty source problem fixed earlier the same day.",
+      "candidate_subreddits_pending_oauth": [
+        "NYCapartments",
+        "AskNYC",
+        "Brooklyn",
+        "Queens",
+        "astoria",
+        "bushwick",
+        "LongIslandCity",
+        "Harlem"
+      ]
     },
     {
       "source_name": "email_alerts",
