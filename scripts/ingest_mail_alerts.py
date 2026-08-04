@@ -31,6 +31,23 @@ ZI_URL = re.compile(r"https://www\.zillow\.com/homedetails/[A-Za-z0-9\-_/\.]+")
 # Zillow use. Every email-ingested listing would have arrived priceless and
 # then been dropped by the rent filter as "rent missing".
 PRICE = re.compile(r"\$\s?(\d{1,2},\d{3}|\d{3,5})(?!\d)")
+# Bed count decides whether a listing can ever be recommended: without it the
+# authenticity classifier scores the record "low" on completeness, and the
+# scorer refuses to recommend anything low. Both portals state it in the alert
+# body ("Studio", "1 bd", "2 beds"), so read it rather than accept the penalty.
+BEDS = re.compile(r"\b(studio)\b|\b(\d)\s*(?:bd|br|bed|beds|bedroom|bedrooms)\b", re.I)
+
+
+def beds_from_text(text: str) -> float | None:
+    m = BEDS.search(text or "")
+    if not m:
+        return None
+    if m.group(1):
+        return 0.0
+    try:
+        return float(m.group(2))
+    except (TypeError, ValueError):
+        return None
 
 
 # An alert email carries a link and a price but no street address, and
@@ -132,6 +149,7 @@ def pull_alert_records(max_messages: int = 40) -> tuple[list[dict[str, Any]], st
                     seen.add(url)
                     window = body[max(0, body.find(url) - 400): body.find(url) + 200]
                     pm = PRICE.search(window)
+                    bd = beds_from_text(window)
                     addr, boro, unit = address_from_url(url)
                     records.append({
                         "id": "ma-" + re.sub(r"[^a-z0-9]+", "-", url.split("//")[1].lower())[:70],
@@ -142,6 +160,7 @@ def pull_alert_records(max_messages: int = 40) -> tuple[list[dict[str, Any]], st
                         "title": (f"{addr} {unit}".strip() if addr else None),
                         "body": None,
                         "price": int(pm.group(1).replace(",", "")) if pm else None,
+                        "beds": bd,
                         "source_hint": src,
                     })
         box.logout()

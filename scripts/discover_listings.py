@@ -2214,7 +2214,7 @@ def discover_email_alerts(
             "neighborhood_hint": None,
             "postal_code": None,
             "price": p.get("price"),
-            "bedrooms": None,
+            "bedrooms": p.get("beds"),
             "bathrooms": None,
             "sqft": None,
             "fee_status": "unknown",
