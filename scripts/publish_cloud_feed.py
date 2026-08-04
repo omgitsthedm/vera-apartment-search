@@ -106,7 +106,12 @@ def main() -> int:
         run = dict(payload.get("run") or {})
         if not run.get("run_id"):
             run["run_id"] = f"cloud-{run_id}"
-            run.setdefault("cadence", "nightly")
+            # Not setdefault: the snapshot carries the key already, set to
+            # None, so setdefault saw it as present and left the null in the
+            # published feed. Falsiness is the test that means what it looks
+            # like it means here.
+            if not run.get("cadence"):
+                run["cadence"] = "nightly"
             repo = os.environ.get("GITHUB_REPOSITORY")
             if repo:
                 run["log_url"] = f"https://github.com/{repo}/actions/runs/{run_id}"
