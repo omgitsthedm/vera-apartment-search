@@ -627,7 +627,14 @@ def neighborhood_verified_by_map(listing: dict[str, Any], reference: dict[str, A
     resolved = canonical_text(reference.get("resolved_neighborhood"))
     listing_neighborhood = canonical_text(listing.get("neighborhood"))
     if resolved and listing_neighborhood:
-        if resolved == listing_neighborhood:
+        # NTA2020 names are compound ("Upper East Side-Carnegie Hill") while
+        # GeoSearch returns a single name ("Carnegie Hill"). Exact comparison
+        # calls that a disagreement and prints a confusing contradiction at
+        # the two names for the same place. Agreement means either contains
+        # the other, part-wise.
+        if resolved == listing_neighborhood or neighborhood_matches(
+            reference.get("resolved_neighborhood"), [listing.get("neighborhood")]
+        ) or neighborhood_matches(listing.get("neighborhood"), [reference.get("resolved_neighborhood")]):
             return True, f"GeoSearch resolved this building in {reference.get('resolved_neighborhood')}."
         return False, f"GeoSearch resolved this building in {reference.get('resolved_neighborhood')}, not {listing.get('neighborhood')}."
     if reference.get("resolved_borough") and listing.get("borough"):
