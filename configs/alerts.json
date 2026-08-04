@@ -1,7 +1,7 @@
 {
   "enabled": true,
-  "recipient": "info@afterhoursagenda.com",
-  "from_address": "info@afterhoursagenda.com",
+  "recipient": "hello@littlefightnyc.com",
+  "from_address": "hello@littlefightnyc.com",
   "recommendations": ["pursue", "pursue cautiously"],
   "min_overall_score": 60,
   "min_listing_confidence": 60,

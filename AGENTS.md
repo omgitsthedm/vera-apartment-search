@@ -2,6 +2,8 @@
 
 - Canonical engine: `/Users/davidmarsh/Code/Personal/vera-apartment-search`, GitHub `omgitsthedm/vera-apartment-search`, branch `main`.
 - Canonical dashboard: `/Users/davidmarsh/Code/Personal/nyc-apartment-search-dashboard`, GitHub `omgitsthedm/vera-dashboard`.
+- Ownership: VERA is an internal Little Fight NYC company product, not a client. Public canonical URL: `https://littlefightnyc.com/vera`. Operational business identity: `hello@littlefightnyc.com`.
+- These Personal checkout paths are intentionally preserved until a separately authorized coordinated move updates every LaunchAgent and dashboard reference; do not casually relocate them.
 - LaunchAgents run this checkout and may refresh and deploy the dashboard automatically.
 - Never run pipeline, schedule-installation, publishing, or deployment scripts without clear production authorization.
 - Never read, stage, expose, or copy `.env*`, raw/private listing data, personal notes, contact details, preferences, or production logs.

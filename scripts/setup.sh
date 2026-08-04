@@ -26,6 +26,7 @@ else
     echo "  ${Y}A config exists but Gmail is rejecting it — re-entering.${R}"
   fi
   echo "  First, in your browser (skip if done):"
+  echo "   • Dedicated inbox: prefer ${B}vera.littlefightnyc@gmail.com${R} or the nearest available handle; recovery goes to hello@littlefightnyc.com"
   echo "   • StreetEasy + Zillow: save your searches, turn ${B}instant email alerts${R} on"
   echo "   • Google Account → Security → 2-Step Verification → ${B}App passwords${R} → create one"
   echo
@@ -80,7 +81,7 @@ else
 {
   "client_id": "$RD_ID",
   "client_secret": "$RD_SECRET",
-  "user_agent": "vera-personal-apartment-watch/1.0 by ${RD_USER:-anonymous}"
+  "user_agent": "vera-littlefightnyc-apartment-watch/1.0 by ${RD_USER:-anonymous}"
 }
 JSON
     chmod 600 "$CFG/reddit.json"
@@ -94,7 +95,7 @@ echo "${B}[3/4] Cloud publish${R} ${D}(lets the Mac stay off)${R}"
 if command -v gh >/dev/null 2>&1 && gh secret list -R omgitsthedm/vera-apartment-search 2>/dev/null | grep -q NETLIFY_AUTH_TOKEN; then
   echo "  ${G}already set${R} — skipping"
 elif command -v gh >/dev/null 2>&1; then
-  echo "  Token: app.netlify.com → User settings → Applications → New access token"
+  echo "  Token: sign in as the Little Fight NYC Netlify Owner (hello@littlefightnyc.com) → User settings → Applications → New access token → description 'VERA cloud publish'"
   read -r -p "  Set the Netlify secrets now? [y/N] " YN
   if [[ "$YN" =~ ^[Yy] ]]; then
     gh secret set NETLIFY_AUTH_TOKEN -R omgitsthedm/vera-apartment-search

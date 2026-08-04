@@ -1,7 +1,10 @@
 # VERA engine source of truth
 
-Verified 2026-07-31.
+Verified 2026-08-03.
 
+- Product owner: Little Fight NYC; VERA is an internal company product, not a client.
+- Operational identity: `hello@littlefightnyc.com`
+- Public canonical URL: `https://littlefightnyc.com/vera`
 - Local: `/Users/davidmarsh/Code/Personal/vera-apartment-search`
 - GitHub: `https://github.com/omgitsthedm/vera-apartment-search`, branch `main`
 - Dashboard: `/Users/davidmarsh/Code/Personal/nyc-apartment-search-dashboard`
@@ -10,4 +13,4 @@ Verified 2026-07-31.
 - Baseline production deploy: `6a6c3be8e180a87e5f0f26ae`
 - Method: local LaunchAgents run this engine; its publisher syncs sanitized public output into the dashboard checkout and performs a CLI production upload.
 
-The active LaunchAgents reference this Code checkout. The old Projects and Desktop/OpenClaw paths are not deployment sources. Do not move this checkout, alter schedules, run the pipeline, or publish as housekeeping. Private/raw data and credentials must remain local and unexposed.
+The active LaunchAgents reference this Code checkout. Agency operations classifies VERA as an internal property and intentionally routes these external supporting checkouts. The old Projects and Desktop/OpenClaw paths are not deployment sources. Do not move this checkout, alter schedules, run the pipeline, or publish as housekeeping. A future move to `/Users/davidmarsh/Code/LiFi NYC/Internal/VERA/` must update all LaunchAgent and dashboard paths in one authorized maintenance window. Private/raw data and credentials must remain local and unexposed.
