@@ -33,6 +33,53 @@ ZI_URL = re.compile(r"https://www\.zillow\.com/homedetails/[A-Za-z0-9\-_/\.]+")
 PRICE = re.compile(r"\$\s?(\d{1,2},\d{3}|\d{3,5})(?!\d)")
 
 
+# An alert email carries a link and a price but no street address, and
+# without an address nothing can reach the city's records — the listing would
+# arrive as an unverifiable stub. Both portals encode the address in the URL:
+#   streeteasy.com/building/459-keap-st-brooklyn/garden
+#   zillow.com/homedetails/114-N-7th-St-1L-Brooklyn-NY-11249/9988776_zpid/
+SE_SLUG = re.compile(r"streeteasy\.com/building/([a-z0-9\-]+?)-(brooklyn|manhattan|queens|bronx|staten-island)(?:/([a-z0-9\-]+))?", re.I)
+ZI_SLUG = re.compile(r"zillow\.com/homedetails/([A-Za-z0-9\-]+?)-(?:New-York|Brooklyn|Bronx|Queens|Staten-Island)-NY-\d{5}/", re.I)
+BOROUGHS = {"brooklyn": "Brooklyn", "manhattan": "Manhattan", "queens": "Queens",
+            "bronx": "Bronx", "staten-island": "Staten Island"}
+
+
+def _tidy(street: str) -> str:
+    """Title-case a slug without mangling ordinals: 7th, not 7Th."""
+    out = []
+    for word in street.split():
+        if re.fullmatch(r"\d+(st|nd|rd|th)", word, re.I):
+            out.append(word.lower())
+        elif re.fullmatch(r"[nsew]", word, re.I):
+            out.append(word.upper())
+        else:
+            out.append(word.capitalize())
+    text = " ".join(out)
+    return re.sub(r"\s+(Apt|Unit|#)$", "", text, flags=re.I).strip()
+
+
+def address_from_url(url: str) -> tuple[str | None, str | None, str | None]:
+    """(address, borough, unit) recovered from a listing URL, or Nones."""
+    m = SE_SLUG.search(url)
+    if m:
+        street = m.group(1).replace("-", " ").strip()
+        return _tidy(street), BOROUGHS.get(m.group(2).lower()), (m.group(3) or None)
+    m = ZI_SLUG.search(url)
+    if m:
+        parts = m.group(1).split("-")
+        # trailing token is often the unit (…-114-N-7th-St-1L)
+        unit = None
+        if len(parts) > 2 and re.fullmatch(r"[0-9]{1,3}[A-Za-z]?|[A-Za-z][0-9]{0,3}", parts[-1] or ""):
+            unit = parts.pop()
+        boro = None
+        for b in ("Brooklyn", "New-York", "Bronx", "Queens", "Staten-Island"):
+            if b.lower() in url.lower():
+                boro = "Manhattan" if b == "New-York" else b.replace("-", " ")
+                break
+        return _tidy(" ".join(parts)), boro, unit
+    return None, None, None
+
+
 def _decode(part) -> str:
     try:
         payload = part.get_payload(decode=True)
@@ -85,10 +132,14 @@ def pull_alert_records(max_messages: int = 40) -> tuple[list[dict[str, Any]], st
                     seen.add(url)
                     window = body[max(0, body.find(url) - 400): body.find(url) + 200]
                     pm = PRICE.search(window)
+                    addr, boro, unit = address_from_url(url)
                     records.append({
                         "id": "ma-" + re.sub(r"[^a-z0-9]+", "-", url.split("//")[1].lower())[:70],
                         "url": url,
-                        "title": None,
+                        "address": addr,
+                        "borough": boro,
+                        "unit": unit,
+                        "title": (f"{addr} {unit}".strip() if addr else None),
                         "body": None,
                         "price": int(pm.group(1).replace(",", "")) if pm else None,
                         "source_hint": src,
