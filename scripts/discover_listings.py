@@ -2762,7 +2762,14 @@ SOURCE_ADAPTERS: dict[str, Any] = {
 # Sources that hard-block datacenter IPs (probed from a GitHub runner,
 # 2026-08-03: renthop 403, leasebreak 403, housing_connect 503). Under
 # VERA_CLOUD=1 these skip honestly instead of burning retries.
-CLOUD_BLOCKED_SOURCES = {"renthop", "leasebreak", "housing_connect"}
+#
+# streeteasy joined 2026-08-04, and only because the honesty fix made it
+# visible: it had been reporting `ok` with zero records every cloud night.
+# Once status came from the actual query outcomes it read "all 11 queries
+# failed" — so the cloud was firing eleven rejected requests a night at a
+# host that has clearly declined. It still runs on the Mac, where it works;
+# this set only applies under VERA_CLOUD=1.
+CLOUD_BLOCKED_SOURCES = {"renthop", "leasebreak", "housing_connect", "streeteasy"}
 
 
 def main() -> int:
