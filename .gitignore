@@ -54,3 +54,4 @@ alerts/
 # Credential configs — real files never committed
 configs/reddit.json
 configs/mail_ingest.json
+.hf-staging/
