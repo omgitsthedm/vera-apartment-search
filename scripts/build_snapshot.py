@@ -179,6 +179,28 @@ def listing_sections(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def distinct_owner_reuse(uids, owner_of: dict[str, str]) -> int:
+    """How many listings share a contact, once one owner's own are discounted.
+
+    A phone number across four listings is a scam-ring tell only when those
+    listings belong to different people. A leasing office answering for its
+    own portfolio is the same number by design, and was being scored as
+    contact reuse at -15 confidence.
+
+    Returns the raw count when more than one party is involved, and 0 when a
+    single known owner is behind all of them. An unknown owner counts as its
+    own party, so a genuine ring with no public record attached is untouched.
+    """
+    owners, unknown = set(), 0
+    for uid in uids:
+        owner = owner_of.get(uid, "")
+        if owner:
+            owners.add(owner)
+        else:
+            unknown += 1
+    return len(uids) if (len(owners) + unknown) > 1 else 0
+
+
 def classify_source_status(raw_status: str | None, skip_reason: str,
                            records_found: int, prior: list[int]) -> str:
     """Decide how healthy a source really is, from this run plus its history.
@@ -267,10 +289,32 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
     desc_map: dict[str, str] = {}
     photo_map: dict[str, str] = {}
     _addr_of = {}
+    _owner_of = {}
+
+    def _owner_key(rec: dict[str, Any]) -> str:
+        """Who is behind this listing, for forensics only. "" when unknown.
+
+        All three forensic tells ask "does this appear at another address?"
+        and none of them asked "under the same owner?". A landlord with two
+        walk-ups reuses one photo, one description template and one leasing
+        phone across both — which is ordinary, and was being scored as a
+        cloned listing, a template scam and a contact ring.
+
+        Business address before corporate name: a portfolio files under many
+        names from one address far more often than the reverse.
+        """
+        p = portfolios.get(str(rec.get("bbl") or "").strip()) or rec.get("landlord_portfolio") or {}
+        for _f in ("topbusinessaddr", "topcorp"):
+            _v = " ".join(str(p.get(_f) or "").strip().lower().split())
+            if _v:
+                return _v
+        return " ".join(str(rec.get("owner_name") or "").strip().lower().split())
+
     for _r in scored_records:
         _uid = _r.get("listing_uid") or ""
         _ak = " ".join(str(_r.get("address_normalized") or "").strip().lower().split())
         _addr_of[_uid] = _ak
+        _owner_of[_uid] = _owner_key(_r)
         _ph = "".join(ch for ch in str(_r.get("contact_phone") or "") if ch.isdigit())[-10:]
         if len(_ph) == 10:
             phone_map.setdefault(_ph, set()).add(_uid)
@@ -316,13 +360,20 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
                 pass
 
         # contact reuse (counts only — the contact itself never leaves)
+        #
+        # One number across four listings is a scam-ring tell only if those
+        # listings belong to different people. A leasing office answering for
+        # its own portfolio is the same number by design, so the sharers are
+        # counted by DISTINCT OWNER: a single known owner behind all of them
+        # is not reuse worth penalising. Unknown owners still count, so a
+        # genuine ring with no public record attached is unaffected.
         _reuse = 0
         _phn = "".join(ch for ch in str(record.get("contact_phone") or "") if ch.isdigit())[-10:]
         if len(_phn) == 10:
-            _reuse = max(_reuse, len(phone_map.get(_phn, ())))
+            _reuse = max(_reuse, distinct_owner_reuse(phone_map.get(_phn, ()), _owner_of))
         _eml = str(record.get("contact_email") or "").strip().lower()
         if "@" in _eml:
-            _reuse = max(_reuse, len(email_map.get(_eml, ())))
+            _reuse = max(_reuse, distinct_owner_reuse(email_map.get(_eml, ()), _owner_of))
         if _reuse > 3:
             record["contact_reuse_count"] = _reuse
 
@@ -334,19 +385,28 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
 
         # template descriptions and hotlink-identical photos across addresses
         _body = "".join(ch for ch in str(record.get("description") or record.get("body") or "").lower() if ch.isalnum())[:400]
+        # Both pairwise tells suppress only when BOTH sides have a known
+        # owner and they match. Unknown on either side still flags: the
+        # reuse across addresses is real, and silence is the worse error.
+        _own2 = _owner_of.get(_uid2, "")
+
+        def _same_owner(other_uid: str) -> bool:
+            _o = _owner_of.get(other_uid, "")
+            return bool(_own2 and _o and _own2 == _o)
+
         if len(_body) >= 200:
             prev = desc_map.get(_body)
-            if prev and _addr_of.get(prev) != _ak2:
+            if prev and _addr_of.get(prev) != _ak2 and not _same_owner(prev):
                 record["desc_clone_of"] = prev
             else:
                 desc_map.setdefault(_body, _uid2)
         for _img in (record.get("image_urls") or [])[:1]:
             if isinstance(_img, str) and _img.startswith("https://"):
-                prev_ak = photo_map.get(_img)
-                if prev_ak is not None and prev_ak != _ak2:
+                prev = photo_map.get(_img)
+                if prev is not None and _addr_of.get(prev, "") != _ak2 and not _same_owner(prev):
                     record["photo_clone_suspect"] = True
                 else:
-                    photo_map.setdefault(_img, _ak2)
+                    photo_map.setdefault(_img, _uid2)
 
         if gtfs_stations and record.get("latitude") is not None and record.get("longitude") is not None:
             try:

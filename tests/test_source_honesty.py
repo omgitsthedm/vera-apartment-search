@@ -234,6 +234,22 @@ def test_a_landlord_reusing_their_own_photo_is_not_a_clone() -> None:
           key({"owner_name": "KING ENTERPRISES"}) == "king enterprises")
 
 
+def test_a_leasing_office_is_not_a_scam_ring() -> None:
+    """Same blind spot as the photo clone, in the contact-reuse tell."""
+    reuse = load("build_snapshot").distinct_owner_reuse
+    uids = [f"u{i}" for i in range(5)]
+    print("\none phone across five listings:")
+    check("all five under one leasing office — not reuse",
+          reuse(uids, {u: "312 east 82nd street 10028" for u in uids}) == 0)
+    check("five different owners — a real ring, counted in full",
+          reuse(uids, {u: f"owner{i}" for i, u in enumerate(uids)}) == 5)
+    check("no public record for any of them — still counted",
+          reuse(uids, {}) == 5, "an unknown owner is its own party")
+    check("one outsider among an office's own — still counted",
+          reuse(uids, {"u0": "x", "u1": "x", "u2": "elsewhere", "u3": "x", "u4": "x"}) == 5)
+    check("a single listing is never reuse", reuse(["u0"], {"u0": "x"}) == 0)
+
+
 def test_the_published_feed_would_have_caught_it() -> None:
     """A source with zero records must never reach the public feed as healthy."""
     pl = load("public_lens")
@@ -266,6 +282,7 @@ if __name__ == "__main__":
     test_neighbourhood_queries_are_scoped_to_the_right_borough()
     test_the_result_budget_goes_where_the_targets_are()
     test_a_landlord_reusing_their_own_photo_is_not_a_clone()
+    test_a_leasing_office_is_not_a_scam_ring()
     test_the_published_feed_would_have_caught_it()
     print()
     if FAILURES:
