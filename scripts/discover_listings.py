@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from workflow_support import ensure_dir, read_json, utc_now_iso, utc_stamp, write_json, write_text
 
 from config.paths import VERA_ROOT as ROOT, CONFIG_DIR as CONFIG_ROOT, LOG_DIR as LOG_ROOT, LEGACY_STATE_DIR as STATE_ROOT, RAW_DIR
+from config.nta_lookup import BOROUGH_CODE_TO_NAME, borough_of
 from config.stage_tracker import write_stage_start, write_stage_end, get_run_id
 from config.anomaly_detector import check_source_anomalies
 from config.source_reliability import record_source_run
@@ -43,6 +44,26 @@ SOURCE_STRATEGIES: dict[str, dict[str, Any]] = {
     "reddit_nycapartments": {"strategy_used": "atom_feed_leads", "base_confidence": 0.35},
     "spareroom": {"strategy_used": "html_dom_selectors", "base_confidence": 0.55},
 }
+
+
+def effective_max_rent(source: dict[str, Any], preferences: dict[str, Any]) -> int:
+    """The ceiling to ask a source for.
+
+    A source-level `max_price` used to win outright, and five of the nine
+    enabled sources carried a stale 2500 while the user's ceiling was 3000 —
+    so openigloo, streeteasy, renthop, leasebreak and spareroom were never
+    even asked for anything between $2,500 and $3,000. A whole fifth of the
+    price range was invisible from those sources, and only craigslist and
+    reddit (which carry no cap) ever surfaced it.
+
+    A cap below the user's ceiling can only lose listings, so it does not
+    win. It is still honoured when it is HIGHER — that is a real override,
+    for a source that can usefully be asked for a wider band than the hunt.
+    """
+    user = preferences.get("max_rent")
+    cap = source.get("max_price")
+    values = [int(v) for v in (user, cap) if v]
+    return max(values) if values else 2500
 
 
 def source_extraction_meta(source_name: str, ok_queries: int = 0, total_queries: int = 0) -> dict[str, Any]:
@@ -404,7 +425,7 @@ def build_craigslist_searches(source: dict[str, Any], preferences: dict[str, Any
     "batch=3-0-360-0-0" scopes the search to area 3 (newyork).
     """
     query_terms = list(source.get("query_terms") or preferences.get("neighborhoods") or [])
-    max_rent = source.get("max_price") or preferences.get("max_rent") or 2500
+    max_rent = effective_max_rent(source, preferences)
     configured = str(source.get("search_base_url") or "")
     base_url = configured if "sapi.craigslist.org" in configured else CRAIGSLIST_SAPI_BASE
     searches: list[dict[str, str]] = []
@@ -771,7 +792,7 @@ def streeteasy_node_to_record(node: dict[str, Any], query_label: str) -> dict[st
 def build_streeteasy_searches(source: dict[str, Any], preferences: dict[str, Any]) -> list[dict[str, str]]:
     """Build StreetEasy search URLs per neighborhood, deduplicating shared slugs."""
     neighborhoods = list(source.get("query_terms") or preferences.get("neighborhoods") or [])
-    max_rent = source.get("max_price") or preferences.get("max_rent") or 2500
+    max_rent = effective_max_rent(source, preferences)
     searches: list[dict[str, str]] = []
     seen_slugs: set[str] = set()
     for neighborhood in neighborhoods:
@@ -798,7 +819,7 @@ def discover_streeteasy_live(
     request_delay_ms = int(source.get("request_delay_ms", 2000))
     max_results_per_query = int(source.get("max_results_per_query", 8))
     cache_ttl_hours = int(source.get("cache_ttl_hours", 12))
-    max_rent = int(source.get("max_price") or preferences.get("max_rent") or 2500)
+    max_rent = effective_max_rent(source, preferences)
     searches = build_streeteasy_searches(source, preferences)
     cache_path = STATE_ROOT / f"{source_name}_listing_cache.json"
     cache = read_json(cache_path, default={})
@@ -896,7 +917,7 @@ def discover_streeteasy_live(
 def build_renthop_searches(source: dict[str, Any], preferences: dict[str, Any]) -> list[dict[str, str]]:
     """Build RentHop search URLs per neighborhood."""
     neighborhoods = list(source.get("query_terms") or preferences.get("neighborhoods") or RENTHOP_NEIGHBORHOOD_NAMES)
-    max_rent = source.get("max_price") or preferences.get("max_rent") or 2500
+    max_rent = effective_max_rent(source, preferences)
     searches: list[dict[str, str]] = []
     for neighborhood in neighborhoods:
         params = urllib.parse.urlencode({
@@ -1012,7 +1033,7 @@ def discover_renthop_live(
     request_delay_ms = int(source.get("request_delay_ms", 2000))
     max_results_per_query = int(source.get("max_results_per_query", 6))
     cache_ttl_hours = int(source.get("cache_ttl_hours", 12))
-    max_rent = int(source.get("max_price") or preferences.get("max_rent") or 2500)
+    max_rent = effective_max_rent(source, preferences)
     searches = build_renthop_searches(source, preferences)
     cache_path = STATE_ROOT / f"{source_name}_listing_cache.json"
     cache = read_json(cache_path, default={})
@@ -1150,7 +1171,7 @@ def discover_craigslist_live(
     request_delay_ms = int(source.get("request_delay_ms", 1200))
     max_results_per_query = int(source.get("max_results_per_query", 6))
     cache_ttl_hours = int(source.get("cache_ttl_hours", 18))
-    max_rent = int(source.get("max_price") or preferences.get("max_rent") or 0)
+    max_rent = effective_max_rent(source, preferences)
     searches = build_craigslist_searches(source, preferences)
     allowed_codes = allowed_craigslist_boroughs(preferences)
     # Catalog-configured borough searches define the discovery scope: if the catalog
@@ -1367,7 +1388,7 @@ def discover_leasebreak_live(
     request_delay_ms = int(source.get("request_delay_ms", 2500))
     max_results = int(source.get("max_results_per_query", 10))
     cache_ttl_hours = int(source.get("cache_ttl_hours", 24))
-    max_rent = int(source.get("max_price") or preferences.get("max_rent") or 2500)
+    max_rent = effective_max_rent(source, preferences)
     cache_path = STATE_ROOT / f"{source_name}_listing_cache.json"
     cache = read_json(cache_path, default={})
 
@@ -1564,7 +1585,7 @@ def discover_nybits_live(
     request_delay_ms = int(source.get("request_delay_ms", 2500))
     max_results = int(source.get("max_results_per_query", 10))
     cache_ttl_hours = int(source.get("cache_ttl_hours", 24))
-    max_rent = int(source.get("max_price") or preferences.get("max_rent") or 2500)
+    max_rent = effective_max_rent(source, preferences)
     cache_path = STATE_ROOT / f"{source_name}_listing_cache.json"
     cache = read_json(cache_path, default={})
 
@@ -1705,7 +1726,7 @@ def discover_housing_connect_live(
     ensure_dir(output_dir)
 
     cache_ttl_hours = int(source.get("cache_ttl_hours", 48))
-    max_rent = int(source.get("max_price") or preferences.get("max_rent") or 2500)
+    max_rent = effective_max_rent(source, preferences)
     cache_path = STATE_ROOT / f"{source_name}_listing_cache.json"
     cache = read_json(cache_path, default={})
 
@@ -1956,7 +1977,7 @@ def discover_nooklyn_live(
     request_delay_ms = int(source.get("request_delay_ms", 2500))
     max_results = int(source.get("max_results_per_query", 8))
     cache_ttl_hours = int(source.get("cache_ttl_hours", 24))
-    max_rent = int(source.get("max_price") or preferences.get("max_rent") or 2500)
+    max_rent = effective_max_rent(source, preferences)
     cache_path = STATE_ROOT / f"{source_name}_listing_cache.json"
     cache = read_json(cache_path, default={})
 
@@ -2204,7 +2225,7 @@ def discover_spareroom_live(
     output_dir = source_output_dir(source)
     ensure_dir(output_dir)
 
-    max_rent = int(source.get("max_price") or preferences.get("max_rent") or 2500)
+    max_rent = effective_max_rent(source, preferences)
     search_url = str(source.get("search_base_url") or "https://www.spareroom.com/flatshare/new_york")
     records: list[dict[str, Any]] = []
 
@@ -2704,25 +2725,62 @@ def parse_openigloo_card(props_raw: str, href: str, fragment: str, query_label: 
 
 
 def build_openigloo_searches(source: dict[str, Any], preferences: dict[str, Any]) -> list[dict[str, str]]:
-    """openigloo filter URLs: /listings/borough:<b>|nbr:<slug>|price:-<max>."""
-    max_rent = int(source.get("max_price") or preferences.get("max_rent") or 2500)
+    """openigloo filter URLs: /listings/borough:<b>|nbr:<slug>|price:-<max>.
+
+    The catalog terms are borough-wide, and a borough page is one page — 18
+    cards. Manhattan's 18 on 2026-08-04 were Washington Heights, Roosevelt
+    Island, Harlem, the Upper West Side: real listings, almost none of them
+    in a target neighbourhood. That is most of why 176 of 229 skips that day
+    read "outside target neighborhood".
+
+    So the borough sweeps stay — they are what makes the Market page the
+    whole net rather than just the hunt — and a neighbourhood-scoped query
+    is added per target. `nbr:upper-east-side` returns a genuinely different
+    18 (E 81 St, E 73 St, Yorkville) instead of the borough's mixture.
+
+    Each is paired with the borough the name actually belongs to. An
+    unrecognised pairing does NOT error: openigloo silently serves the
+    unfiltered borough page, so `borough:manhattan|nbr:greenpoint` came back
+    byte-identical to plain `borough:manhattan`. discover_openigloo_live
+    detects that and discards it, otherwise a query that found nothing new
+    would still read as a productive one.
+    """
+    max_rent = effective_max_rent(source, preferences)
+
+    def url_for(filters: str) -> str:
+        return ("https://www.openigloo.com/listings/"
+                + urllib.parse.quote(f"{filters}|price:-{max_rent}", safe=":|-"))
+
     searches: list[dict[str, str]] = []
+    borough_filters: set[str] = set()
     for term in source.get("query_terms") or []:
         term = str(term).strip()
         if not term:
             continue
-        if ":" in term:
-            # Pre-built filter expression straight from the catalog.
-            filters = term
-            label = term
-        else:
-            filters = f"borough:{term.lower().replace(' ', '-')}"
-            label = term
-        url = (
-            "https://www.openigloo.com/listings/"
-            + urllib.parse.quote(f"{filters}|price:-{max_rent}", safe=":|-")
-        )
-        searches.append({"label": label, "url": url})
+        # Pre-built filter expression straight from the catalog, else a borough name.
+        filters = term if ":" in term else f"borough:{term.lower().replace(' ', '-')}"
+        borough_filters.add(filters)
+        searches.append({"label": term, "url": url_for(filters), "scope": "borough"})
+
+    for hood in preferences.get("neighborhoods", []) or []:
+        code = borough_of(hood)
+        boro = BOROUGH_CODE_TO_NAME.get(code or "")
+        if not boro:
+            # Either unknown to the NTA set or ambiguous across boroughs.
+            # Scoping to a guess would search the wrong half of the city.
+            continue
+        base = f"borough:{boro}"
+        if base not in borough_filters:
+            continue          # only narrow boroughs we are already sweeping
+        slug = re.sub(r"[^a-z0-9]+", "-", str(hood).strip().lower()).strip("-")
+        if not slug:
+            continue
+        searches.append({
+            "label": f"{hood}",
+            "url": url_for(f"{base}|nbr:{slug}"),
+            "scope": "neighborhood",
+            "borough_filter": base,
+        })
     return searches
 
 
@@ -2739,12 +2797,16 @@ def discover_openigloo_live(
 
     request_delay_ms = int(source.get("request_delay_ms", 2000))
     max_results_per_query = int(source.get("max_results_per_query", 20))
-    max_rent = int(source.get("max_price") or preferences.get("max_rent") or 2500)
+    max_rent = effective_max_rent(source, preferences)
     searches = build_openigloo_searches(source, preferences)
 
     records_by_id: dict[str, dict[str, Any]] = {}
     query_summaries: list[dict[str, Any]] = []
     fresh_fetches = 0
+    # Borough result sets, so a neighbourhood query that merely echoes one can
+    # be recognised. Boroughs are ordered first in build_openigloo_searches.
+    borough_hrefs: dict[str, frozenset] = {}
+    borough_hrefs_by_filter: dict[str, frozenset] = {}
 
     for search in searches:
         query_label = search["label"]
@@ -2758,8 +2820,33 @@ def discover_openigloo_live(
             continue
 
         time.sleep(request_delay_ms / 1000)
+
+        cards = OI_CARD_RE.findall(search_html)
+        href_set = frozenset(h for _, h, _ in cards)
+
+        # openigloo answers an unrecognised borough+neighbourhood pairing with
+        # the plain borough page rather than an error or an empty result:
+        # borough:manhattan|nbr:greenpoint came back byte-identical to
+        # borough:manhattan. Counting that as a neighbourhood result would
+        # make a query that discovered nothing look like a productive one —
+        # the same disease as a source reporting ok with zero records.
+        scope = search.get("scope")
+        if scope == "borough":
+            borough_hrefs[search["label"]] = href_set
+            borough_hrefs_by_filter[search.get("url", "")] = href_set
+        elif scope == "neighborhood" and href_set and href_set in borough_hrefs.values():
+            query_summaries.append({
+                "query": query_label, "status": "ok", "result_count": 0,
+                "search_url": query_url, "note": "slug not recognised — served the whole borough",
+            })
+            log_lines.append(
+                f"{source_name}: '{query_label}' returned the unfiltered borough page — "
+                f"openigloo does not recognise that neighbourhood slug; discarding"
+            )
+            continue
+
         kept_for_query = 0
-        for props_raw, href, fragment in OI_CARD_RE.findall(search_html):
+        for props_raw, href, fragment in cards:
             if kept_for_query >= max_results_per_query:
                 break
             record = parse_openigloo_card(props_raw, href, fragment, query_label)

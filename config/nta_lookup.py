@@ -137,6 +137,27 @@ def target_boroughs(targets: set[str] | list[str]) -> frozenset:
     return result
 
 
+BOROUGH_CODE_TO_NAME = {
+    "M": "manhattan", "B": "brooklyn", "Q": "queens",
+    "X": "bronx", "S": "staten-island",
+}
+
+
+def borough_of(name: Any) -> str | None:
+    """The single borough a neighbourhood name belongs to, or None.
+
+    None when the name reaches no NTA at all, or reaches more than one
+    borough — "Murray Hill" is both Manhattan and Flushing, and a caller
+    that scoped a search to the wrong one would get quietly useless results.
+    """
+    n = str(name or "").strip().lower()
+    if not n:
+        return None
+    hit = {h["boro"] for h in _hoods()
+           if h.get("boro") and neighborhood_matches(h.get("name"), [n])}
+    return next(iter(hit)) if len(hit) == 1 else None
+
+
 def in_target_area(listing: dict[str, Any], targets: set[str] | list[str]) -> bool:
     """Target match that a same-named neighbourhood elsewhere cannot fake.
 

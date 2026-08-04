@@ -117,6 +117,56 @@ def test_a_source_cannot_pad_its_count_with_index_pages() -> None:
           junk(0.0, "") is False, "0 is a price; None is not a listing")
 
 
+def test_a_source_is_never_asked_for_less_than_the_hunt_wants() -> None:
+    """Five of nine enabled sources carried a stale 2500 cap while the user's
+    ceiling was 3000, so a fifth of the price range was never requested."""
+    dl = load("discover_listings")
+    emr = dl.effective_max_rent
+    print("\nthe ceiling a source is asked for:")
+    check("a stale source cap does not undercut the hunt",
+          emr({"max_price": 2500}, {"max_rent": 3000}) == 3000, str(emr({"max_price": 2500}, {"max_rent": 3000})))
+    check("a genuinely wider source cap is still honoured",
+          emr({"max_price": 4000}, {"max_rent": 3000}) == 4000)
+    check("no source cap means the hunt's ceiling",
+          emr({}, {"max_rent": 3000}) == 3000)
+    check("no preference means the source cap",
+          emr({"max_price": 2500}, {}) == 2500)
+    check("neither means the documented default", emr({}, {}) == 2500)
+
+    import json as _json
+    prefs = _json.loads((ROOT / "configs" / "user_preferences.json").read_text())
+    cat = _json.loads((ROOT / "configs" / "source_catalog.json").read_text())
+    low = [s["source_name"] for s in cat["sources"] if s.get("enabled")
+           and emr(s, prefs) < prefs["max_rent"]]
+    check("no enabled source is asked for less than the ceiling today",
+          not low, ", ".join(low) or "none")
+
+
+def test_neighbourhood_queries_are_scoped_to_the_right_borough() -> None:
+    dl = load("discover_listings")
+    import json as _json
+    prefs = _json.loads((ROOT / "configs" / "user_preferences.json").read_text())
+    cat = _json.loads((ROOT / "configs" / "source_catalog.json").read_text())
+    src = next(s for s in cat["sources"] if s["source_name"] == "openigloo")
+    searches = dl.build_openigloo_searches(src, prefs)
+    boro = [s for s in searches if s.get("scope") == "borough"]
+    hood = [s for s in searches if s.get("scope") == "neighborhood"]
+    by_label = {s["label"]: s["url"] for s in hood}
+
+    print("\nneighbourhood-scoped queries:")
+    check("the borough sweeps are kept — the wide net stays wide", len(boro) >= 4, str(len(boro)))
+    check("and target neighbourhoods are queried directly", len(hood) >= 25, str(len(hood)))
+    check("Manhattan hoods scope to manhattan",
+          "borough:manhattan|nbr:upper-east-side" in by_label.get("Upper East Side", ""))
+    check("Brooklyn hoods scope to brooklyn",
+          "borough:brooklyn|nbr:williamsburg" in by_label.get("Williamsburg", ""))
+    check("a name that spans boroughs is not scoped at all",
+          "Murray Hill" not in by_label,
+          "Manhattan and Flushing both — a guess would search the wrong half of the city")
+    check("every query carries the hunt's real ceiling",
+          all("price:-3000" in u for u in by_label.values()), "")
+
+
 def test_the_published_feed_would_have_caught_it() -> None:
     """A source with zero records must never reach the public feed as healthy."""
     pl = load("public_lens")
@@ -145,6 +195,8 @@ if __name__ == "__main__":
     test_status_reflects_what_happened()
     test_no_history_is_not_a_clean_bill_of_health()
     test_a_source_cannot_pad_its_count_with_index_pages()
+    test_a_source_is_never_asked_for_less_than_the_hunt_wants()
+    test_neighbourhood_queries_are_scoped_to_the_right_borough()
     test_the_published_feed_would_have_caught_it()
     print()
     if FAILURES:
