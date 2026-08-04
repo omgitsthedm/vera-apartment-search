@@ -66,7 +66,12 @@ jobs:
   # of them in a 7-day artifact nothing could read.
   cloud-discovery:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 45 was sized for discovery alone. This job now also runs 33 extra
+    # neighbourhood queries, a craigslist budget spent on the boroughs that
+    # matter, and three enrichment steps — one of which downloads a photo per
+    # listing to fingerprint it. A timeout here would abandon the run after
+    # paying for all of it, so the ceiling is generous rather than tight.
+    timeout-minutes: 75
     permissions:
       contents: write        # only to force-push the orphan `feed` branch
     steps:
