@@ -20,6 +20,7 @@ from config.stage_tracker import read_all_stage_states, read_latest_run, record_
 from config.source_reliability import compute_reliability_score, get_all_source_trends, success_rate_from_trends
 from config.anomaly_detector import get_all_anomaly_reports
 from config.source_recommendations import recommend_source_actions, recommend_run_actions, compute_reliability_breakdown
+from config.listing_text_flags import scan_listing_text
 from config.listing_confidence import apply_forensic_deductions, compute_listing_confidence, summarize_confidence_distribution
 from config.listing_explanations import generate_listing_explanations, format_why_this_listing
 from workflow_support import ensure_dir, latest_file, read_csv_rows, read_json, state_path_or_latest, utc_now_iso, write_json
@@ -339,6 +340,13 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
         if (_ai.get("prob_ai") or 0) >= 0.85:
             record["ai_photo_suspect"] = True
             record["ai_photo_probability"] = _ai["prob_ai"]
+
+        # the listing's own words, read against New York law
+        _tf = scan_listing_text(record)
+        if _tf.get("illegal_demands"):
+            record["illegal_demands"] = _tf["illegal_demands"]
+        if _tf.get("scam_cues_found"):
+            record["scam_cues_found"] = _tf["scam_cues_found"]
 
         # tells attached above — now let them count (approved 2026-08-03)
         apply_forensic_deductions(record)
