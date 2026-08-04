@@ -15,17 +15,37 @@ echo
 
 # ── 1. Gmail saved-search ingestion ────────────────────────────────
 echo "${B}[1/4] The Gmail firehose${R} ${D}(biggest win)${R}"
-if [[ -f "$CFG/mail_ingest.json" ]] && ! grep -q "YOUR_\|PASTE" "$CFG/mail_ingest.json"; then
-  echo "  ${G}already configured${R} — skipping"
+# "Already configured" must mean "actually works", not "a file exists". A
+# config holding a rejected password would otherwise cause this step to skip
+# itself forever while the firehose stayed dead.
+if [[ -f "$CFG/mail_ingest.json" ]] && ! grep -q "YOUR_\|PASTE" "$CFG/mail_ingest.json" \
+   && python3 "$ROOT/scripts/ingest_mail_alerts.py" 2>/dev/null | grep -q '"status": "ok"'; then
+  echo "  ${G}already configured and connecting${R} — skipping"
 else
+  if [[ -f "$CFG/mail_ingest.json" ]]; then
+    echo "  ${Y}A config exists but Gmail is rejecting it — re-entering.${R}"
+  fi
   echo "  First, in your browser (skip if done):"
   echo "   • StreetEasy + Zillow: save your searches, turn ${B}instant email alerts${R} on"
   echo "   • Google Account → Security → 2-Step Verification → ${B}App passwords${R} → create one"
   echo
   read -r -p "  Your Gmail address (Return to skip): " MAIL_ADDR
   if [[ -n "$MAIL_ADDR" ]]; then
+    :
     read -r -s -p "  The 16-character app password (hidden): " MAIL_PW; echo
     MAIL_PW="${MAIL_PW// /}"
+    # A Google app password is exactly 16 lowercase letters. Anything else is
+    # almost always the account password typed by mistake, which fails IMAP
+    # with a bare AUTHENTICATIONFAILED and no hint about why.
+    while [[ ${#MAIL_PW} -ne 16 || ! "$MAIL_PW" =~ ^[a-zA-Z]{16}$ ]]; do
+      echo "  ${Y}That is ${#MAIL_PW} characters. A Google app password is exactly 16 letters.${R}"
+      echo "  ${D}If you typed your normal account password, that will not work — IMAP only"
+      echo "  accepts an app password. Get one at myaccount.google.com/apppasswords"
+      echo "  (it only appears once 2-Step Verification is on).${R}"
+      read -r -s -p "  App password (hidden, or Return to skip this step): " MAIL_PW; echo
+      MAIL_PW="${MAIL_PW// /}"
+      [[ -z "$MAIL_PW" ]] && break
+    done
     cat > "$CFG/mail_ingest.json" <<JSON
 {
   "imap_host": "imap.gmail.com",
