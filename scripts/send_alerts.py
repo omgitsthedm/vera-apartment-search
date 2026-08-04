@@ -123,6 +123,33 @@ def describe(rec: dict) -> str:
     if why:
         lines.append("  Why it fits: " + ", ".join(why) + f" — {rec.get('recommendation')}")
 
+    # The commute, quoted from the timetable rather than invented.
+    tr = rec.get("transit") or {}
+    if tr.get("station"):
+        lines_txt = " ".join(tr.get("lines") or [])
+        lines.append(f"  Train: ≈{tr.get('walk_mins')} min walk to {tr['station']}" + (f" ({lines_txt})" if lines_txt else ""))
+
+    cash = rec.get("estimated_move_in_cash")
+    if isinstance(cash, (int, float)) and cash > 0:
+        lines.append(f"  Cash to keys: ≈${cash:,.0f}")
+
+    # An unlawful demand must never reach you buried under a recommendation.
+    # If VERA is putting this listing in front of you, it says so up front.
+    for d in (rec.get("illegal_demands") or [])[:3]:
+        lines.append(f"  ⚠ UNLAWFUL: {d.get('says')} — {d.get('law')}")
+    for c in (rec.get("scam_cues_found") or [])[:2]:
+        lines.append(f"  Caution: {c.get('says')}")
+
+    # What this owner does to their other tenants.
+    pf = rec.get("landlord_portfolio") or {}
+    if pf.get("bldgs"):
+        bits = [f"{pf['bldgs']} building" + ("" if pf["bldgs"] == 1 else "s")]
+        if pf.get("totalevictions"):
+            bits.append(f"{pf['totalevictions']} evictions filed")
+        if pf.get("openviolationsperresunit"):
+            bits.append(f"{pf['openviolationsperresunit']} open violations per apartment")
+        lines.append(f"  Owner's wider record: {pf.get('topcorp') or 'portfolio'} — " + ", ".join(bits))
+
     for caveat in (rec.get("trust_caveats") or [])[:2]:
         lines.append(f"  Eyes open: {caveat}")
     for step in (rec.get("what_to_verify_before_applying") or [])[:2]:
@@ -130,6 +157,7 @@ def describe(rec: dict) -> str:
     url = rec.get("url") or rec.get("source_url")
     if url:
         lines.append(f"  Listing: {url}")
+    lines.append(f"  Full ledger: {APP_URL}#/listing/{rec.get('listing_uid')}")
     return "\n".join(lines)
 
 
