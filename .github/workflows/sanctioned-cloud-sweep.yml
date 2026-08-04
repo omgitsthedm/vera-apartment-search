@@ -1,18 +1,18 @@
 # Option A — ACTIVE (approved by David 2026-08-03, "I approve of all of it").
-# The sanctioned half runs in the cloud daily; residential-IP sources stay
-# on the Mac. Cloud publish joins once David adds the Netlify secrets.
 #
-# Scope: the SANCTIONED half only — official CSVs and GTFS, which probe
-# clean from datacenter IPs. Residential-IP sources (Craigslist 403,
-# Housing Connect 503, anonymous Reddit 429) stay on the Mac; Task-8
-# email ingestion joins here once credentials exist (add IMAP secrets).
+# PUBLISHING NEEDS NO SECRET. This used to say "cloud publish joins once
+# David adds the Netlify secrets" and told the reader to create
+# NETLIFY_AUTH_TOKEN and NETLIFY_SITE_ID. That is superseded: the publish
+# step below uses only the automatic GITHUB_TOKEN. Do NOT create a Netlify
+# personal access token for VERA — the Little Fight NYC handoff records
+# this as a settled determination, and a PAT created during setup was
+# deleted once the code audit proved it unnecessary.
 #
-# To activate under Option A, David says the word and we:
-#   1. uncomment the cron
-#   2. add repo secrets: NETLIFY_AUTH_TOKEN + NETLIFY_SITE_ID (publish),
-#      later VERA_IMAP_* (ingestion)
-#   3. teach the Mac sweep to merge cloud-produced context instead of
-#      refetching it
+# Scope: official CSVs and GTFS probe clean from datacenter IPs, and the
+# 2026-08-03 probe showed nearly every source does. Genuinely blocked
+# sources (renthop, leasebreak, housing_connect, streeteasy) skip honestly
+# via VERA_CLOUD=1. Email ingestion is not here and is blocked on a
+# human-owned Google account appeal, not on secrets.
 name: sanctioned-cloud-sweep
 
 on:
@@ -122,6 +122,9 @@ jobs:
             state/photo_provenance.json
             state/photo_clone_flags.json
             state/landlord_portfolios.json
+            state/ai_photo_flags.json
+            state/listing_history.json
+            state/seen_cluster_ids.json
             state/daily_changes
           key: vera-state-${{ github.run_id }}
           restore-keys: vera-state-
@@ -129,7 +132,8 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, pathlib
-          for name in ("source_trends", "price_history", "photo_hashes", "change_history"):
+          for name in ("source_trends", "price_history", "photo_hashes", "change_history",
+                       "ai_photo_flags", "listing_history", "landlord_portfolios"):
               p = pathlib.Path("state") / f"{name}.json"
               if not p.exists():
                   print(f"  {name}: absent — first run, or the cache expired")
@@ -236,6 +240,9 @@ jobs:
             state/photo_provenance.json
             state/photo_clone_flags.json
             state/landlord_portfolios.json
+            state/ai_photo_flags.json
+            state/listing_history.json
+            state/seen_cluster_ids.json
             state/daily_changes
           key: vera-state-${{ github.run_id }}
 
