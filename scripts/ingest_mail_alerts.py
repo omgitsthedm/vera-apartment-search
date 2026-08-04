@@ -25,7 +25,12 @@ CONFIG = ROOT / "configs" / "mail_ingest.json"
 
 SE_URL = re.compile(r"https://streeteasy\.com/(?:rental|building)/[A-Za-z0-9\-_/#\.]+")
 ZI_URL = re.compile(r"https://www\.zillow\.com/homedetails/[A-Za-z0-9\-_/\.]+")
-PRICE = re.compile(r"\$\s?([1-9][0-9]{2,3}(?:,[0-9]{3})?)")
+# Rents as the portals actually write them: "$2,200", "$2,200/mo",
+# "$2200". The previous pattern required 3-4 digits before any comma, so it
+# matched "$2200" and missed "$2,200" — which is the form both StreetEasy and
+# Zillow use. Every email-ingested listing would have arrived priceless and
+# then been dropped by the rent filter as "rent missing".
+PRICE = re.compile(r"\$\s?(\d{1,2},\d{3}|\d{3,5})(?!\d)")
 
 
 def _decode(part) -> str:
