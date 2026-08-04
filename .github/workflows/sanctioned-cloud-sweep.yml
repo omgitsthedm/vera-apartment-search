@@ -118,6 +118,12 @@ jobs:
       # against a cache that plainly existed on the same ref. The run after
       # that restored normally. Expect one blank night per path change and
       # do not go hunting for a bug.
+      #
+      # listing_history and seen_cluster_ids are the two exceptions to the
+      # state/ paths below. config/paths.py maps LEGACY_STATE_DIR to
+      # cache/state, and normalize_listings, build_snapshot and score_listings
+      # write them there. Keep explanatory prose outside the literal path
+      # input: every nonblank line participates in the cache version.
       - name: Restore the engine's memory
         uses: actions/cache/restore@v4
         with:
@@ -134,11 +140,6 @@ jobs:
             state/landlord_portfolios.json
             state/ai_photo_flags.json
             state/daily_changes
-            # NOT state/ — config/paths.py maps LEGACY_STATE_DIR to
-            # cache/state, and normalize_listings, build_snapshot and
-            # score_listings all import it as STATE_ROOT. These two are
-            # written there. Cached under state/ they restored as absent
-            # while the file sat in cache/state the whole time.
             cache/state/listing_history.json
             cache/state/seen_cluster_ids.json
           key: vera-state-${{ github.run_id }}
@@ -148,7 +149,8 @@ jobs:
           python3 - <<'PY'
           import json, pathlib
           for name in ("source_trends", "price_history", "photo_hashes", "change_history",
-                       "ai_photo_flags", "listing_history", "landlord_portfolios"):
+                       "ai_photo_flags", "listing_history", "seen_cluster_ids",
+                       "landlord_portfolios"):
               p = pathlib.Path("state") / f"{name}.json"
               if not p.exists():
                   p = pathlib.Path("cache/state") / f"{name}.json"
@@ -261,11 +263,6 @@ jobs:
             state/landlord_portfolios.json
             state/ai_photo_flags.json
             state/daily_changes
-            # NOT state/ — config/paths.py maps LEGACY_STATE_DIR to
-            # cache/state, and normalize_listings, build_snapshot and
-            # score_listings all import it as STATE_ROOT. These two are
-            # written there. Cached under state/ they restored as absent
-            # while the file sat in cache/state the whole time.
             cache/state/listing_history.json
             cache/state/seen_cluster_ids.json
           key: vera-state-${{ github.run_id }}

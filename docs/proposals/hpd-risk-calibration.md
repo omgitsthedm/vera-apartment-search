@@ -1,6 +1,9 @@
 # HPD risk saturates, and it is quietly gating your alerts
 
-**Found:** 2026-08-04 · **Status:** diagnosis stands; MY PROPOSED FIX WAS WRONG and testing proved it. Built behind `VERA_HPD_PER_UNIT`, default OFF. Do not enable as-is.
+**Found:** 2026-08-04 · **Status:** diagnosis confirmed. The rejected
+per-unit experiment remains behind `VERA_HPD_PER_UNIT`, default OFF, and
+must not be enabled. The calibrated, no-divisor formula documented later in
+this file is the standing default since commit `368bef7`.
 
 ## The evidence
 
@@ -55,7 +58,7 @@ synthetic 50.0 default and sail through that particular check.
 That is backwards, and it is why so little reaches your inbox: tonight
 four listings were recommended and only one could ever have been emailed.
 
-## Proposed fix (needs approval)
+## First proposed fix (rejected; remains off)
 
 Normalise by units and separate severity from noise — the metric JustFix
 uses, and which VERA already fetches for portfolios
@@ -74,10 +77,9 @@ Against tonight's data this would separate 114 N Seventh (clean, small)
 from 580 St Nicholas (23 serious, 50 heat outages) instead of calling them
 the same building.
 
-**Do not apply this without David.** It changes what gets recommended and
-what gets emailed, which is exactly the class of change AGENTS.md reserves
-to him. The diagnosis above stands on its own regardless of the remedy
-chosen.
+**Do not apply this.** The measurement below disproved it. It remains here as
+the research record for why per-unit normalization is wrong for VERA; the
+diagnosis above stands independently of this rejected remedy.
 
 
 ---
@@ -135,7 +137,7 @@ The flag stays for experimenting. It should not be turned on as written.
 
 ---
 
-# A working formula, tested — `VERA_HPD_CALIBRATED` (still OFF)
+# A working formula, tested — `VERA_HPD_CALIBRATED` (standing default)
 
 Direction 1 and 2 from the list above, built and measured. Severity carries
 the score, ordinary violations barely move it, an exponential curve spreads
@@ -165,14 +167,13 @@ with **zero serious violations** stops scoring maximum risk; a small
 owner-direct building with a couple of violations stays reachable, which is
 VERA's whole point; and genuinely neglected buildings still block hard.
 
-**Still off by default.** Enabling changes what gets recommended and
-emailed, which is David's call. To try it:
+**Standing default since commit `368bef7`.** The calibrated path now runs
+unless explicitly pinned off for a controlled comparison. To exercise the
+legacy formula for one run without changing standing configuration:
 
 ```bash
-VERA_HPD_CALIBRATED=1 python3 scripts/enrich_listings.py   # one run
+VERA_HPD_CALIBRATED=0 python3 scripts/enrich_listings.py   # one comparison run
 ```
-or set `"hpd_calibrated": true` in `configs/user_preferences.json` to make it
-the standing behaviour.
 
 Worth deciding alongside it: `max_hpd_risk: 65` was tuned against a
 saturating score. Against this one, 65 lands between 48 W 138 (66.5, just
