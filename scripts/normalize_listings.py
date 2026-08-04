@@ -85,6 +85,9 @@ BROKER_FEE_CUES = {
 }
 
 
+from config.nta_lookup import neighborhood_matches, resolve_neighborhood
+
+
 def cheap_filter_status(listing: dict[str, Any], preferences: dict[str, Any]) -> tuple[bool, list[str]]:
     failures: list[str] = []
     allowed_neighborhoods = {canonical_text(item) for item in preferences.get("neighborhoods", [])}
@@ -93,7 +96,9 @@ def cheap_filter_status(listing: dict[str, Any], preferences: dict[str, Any]) ->
     max_rent = preferences.get("max_rent")
     beds = listing.get("beds")
 
-    if allowed_neighborhoods and neighborhood not in allowed_neighborhoods:
+    if allowed_neighborhoods and not neighborhood_matches(
+        listing.get("neighborhood"), allowed_neighborhoods
+    ):
         failures.append("outside target neighborhoods")
     if rent is None or (max_rent is not None and rent > max_rent):
         failures.append("above max rent or rent missing")
@@ -332,6 +337,16 @@ def normalize_record(source_name: str, record: dict[str, Any], captured_at: str,
         "raw_snapshot_path": str(first_present(record, "_snapshot_path") or ""),
         "raw_record_index": first_present(record, "_record_index"),
     }
+    # Sources routinely put a BOROUGH in the neighborhood field. Resolve the
+    # real NTA from the coordinates first so the filters compare like with
+    # like — a listing on a target block should not be rejected as "outside
+    # target neighborhoods" because its source said "Brooklyn".
+    _hood, _resolved = resolve_neighborhood(normalized)
+    if _resolved and _hood:
+        normalized["neighborhood_source"] = normalized.get("neighborhood")
+        normalized["neighborhood"] = _hood
+        normalized["neighborhood_resolved_from_coords"] = True
+
     cheap_passed, cheap_failures = cheap_filter_status(normalized, preferences)
     normalized["cheap_filter_passed"] = cheap_passed
     normalized["cheap_filter_failures"] = cheap_failures

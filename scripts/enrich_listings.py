@@ -299,13 +299,16 @@ def load_deduped_rows() -> list[dict[str, Any]]:
     return read_json(path, default=[])
 
 
+from config.nta_lookup import neighborhood_matches
+
+
 def evaluate_hard_filters(listing: dict[str, Any], preferences: dict[str, Any]) -> tuple[bool, list[str]]:
     reasons: list[str] = []
     search_mode = listing.get("search_mode", "mode_a_permanent")
 
     neighborhoods = {canonical_text(item) for item in preferences.get("neighborhoods", [])}
     listing_neighborhood = canonical_text(listing.get("neighborhood"))
-    if listing_neighborhood not in neighborhoods:
+    if not neighborhood_matches(listing.get("neighborhood"), neighborhoods):
         # Bridge mode is more lenient on neighborhood — still note it but don't hard-reject
         if search_mode != SEARCH_MODE_BRIDGE:
             reasons.append("outside target neighborhood")
