@@ -238,7 +238,10 @@ def build_hunt_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(run, dict):
         hunt["run"] = {
             k: run.get(k)
-            for k in ("run_id", "cadence", "status", "finished_at")
+            # log_url is a public Actions URL for the run that built this
+            # feed. A product whose whole posture is receipts should let
+            # anyone read the log that produced the numbers.
+            for k in ("run_id", "cadence", "status", "finished_at", "log_url")
             if k in run
         }
     vera = payload.get("vera")

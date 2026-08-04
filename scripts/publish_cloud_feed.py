@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -94,6 +95,22 @@ def main() -> int:
     snapshot, source = load_snapshot()
     generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     payload = {**snapshot, "generated_at": generated_at}
+
+    # Every cloud publish carried run_id: null, because state/latest_run.json
+    # is written by the Mac's autonomous runners and run_daily.sh — which is
+    # what the cloud runs — never writes it. So the System page's Run panel
+    # named nothing, and no published feed could be traced to the run that
+    # produced it. In Actions the run genuinely does have an identity.
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    if run_id:
+        run = dict(payload.get("run") or {})
+        if not run.get("run_id"):
+            run["run_id"] = f"cloud-{run_id}"
+            run.setdefault("cadence", "nightly")
+            repo = os.environ.get("GITHUB_REPOSITORY")
+            if repo:
+                run["log_url"] = f"https://github.com/{repo}/actions/runs/{run_id}"
+        payload["run"] = run
 
     hunt = build_hunt_payload(payload)
     extras = build_public_extras(payload, snapshot_root=SNAPSHOTS)
