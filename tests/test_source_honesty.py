@@ -196,6 +196,44 @@ def test_the_result_budget_goes_where_the_targets_are() -> None:
           total <= 250, f"{total} detail fetches vs 250 before")
 
 
+def test_a_landlord_reusing_their_own_photo_is_not_a_clone() -> None:
+    """The clone detector accuses; the accusation has to be right.
+
+    On 2026-08-04, the first night portfolio data reached the cloud, both
+    flagged listings were 322 E 81 St and 321 E 75 St — filed under Round
+    Hill Management and Frank & Walter Eberhart L.P. #1, which JustFix puts
+    under Eberhart Brothers, LLC at the same business address, 46 buildings.
+    One owner, two of their own walk-ups, one marketing photo. The flag costs
+    20 points of confidence and both scored 59.6 and 59.9 against a 60 bar.
+    """
+    ph = load("refresh_photo_hashes")
+    key = ph.owner_key
+    print("\nsame photo, same owner:")
+
+    eberhart = {"landlord_portfolio": {"topbusinessaddr": "312 EAST 82ND STREET 10028",
+                                       "topcorp": "Eberhart Brothers, LLC"}}
+    eberhart2 = {"landlord_portfolio": {"topbusinessaddr": "312 East 82nd Street 10028",
+                                        "topcorp": "Eberhart Brothers, LLC"}}
+    orchard = {"landlord_portfolio": {"topbusinessaddr": "17 STANTON STREET 2 10002",
+                                      "topcorp": "ORCHARD STREET REALTY LLC"}}
+
+    def suppressed(a, b):
+        ka, kb = key(a), key(b)
+        return bool(ka and kb and ka == kb)
+
+    check("the real pair is recognised as one owner", suppressed(eberhart, eberhart2) is True)
+    check("case and spacing do not defeat it", key(eberhart) == key(eberhart2))
+    check("two unrelated owners still get flagged", suppressed(eberhart, orchard) is False)
+    check("an unknown owner on either side still gets flagged",
+          suppressed(eberhart, {}) is False, "silence is the more dangerous error")
+    check("both unknown still gets flagged", suppressed({}, {}) is False)
+    check("business address is preferred over the corporate name",
+          key({"landlord_portfolio": {"topbusinessaddr": "1 main st", "topcorp": "X LLC"}}) == "1 main st",
+          "names differ across a portfolio more often than the address they file from")
+    check("falls back to owner_name when there is no portfolio yet",
+          key({"owner_name": "KING ENTERPRISES"}) == "king enterprises")
+
+
 def test_the_published_feed_would_have_caught_it() -> None:
     """A source with zero records must never reach the public feed as healthy."""
     pl = load("public_lens")
@@ -227,6 +265,7 @@ if __name__ == "__main__":
     test_a_source_is_never_asked_for_less_than_the_hunt_wants()
     test_neighbourhood_queries_are_scoped_to_the_right_borough()
     test_the_result_budget_goes_where_the_targets_are()
+    test_a_landlord_reusing_their_own_photo_is_not_a_clone()
     test_the_published_feed_would_have_caught_it()
     print()
     if FAILURES:

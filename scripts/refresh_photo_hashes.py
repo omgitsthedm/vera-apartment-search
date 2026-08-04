@@ -60,6 +60,32 @@ def addr_key(rec: dict) -> str:
     return " ".join(str(rec.get("address_normalized") or "").strip().lower().split())
 
 
+def owner_key(rec: dict) -> str:
+    """A stable identity for whoever is behind the listing, or "".
+
+    The clone rule is "same photo, different address", and on its own that
+    accuses a landlord who reuses one marketing photo across their own
+    buildings — which is ordinary and not fraud. The first night portfolio
+    data reached the cloud (2026-08-04) both flagged listings were
+    322 E 81 St and 321 E 75 St, filed under Round Hill Management and
+    Frank & Walter Eberhart L.P. #1 — and JustFix puts both under
+    Eberhart Brothers, LLC at 312 East 82nd Street, 46 buildings. The same
+    owner, two of their own walk-ups, one photo.
+
+    That flag costs a listing 20 points of confidence. Both scored 59.6 and
+    59.9 against a 60.0 bar.
+
+    Business address first: corporate names differ across a portfolio far
+    more often than the address they all file from.
+    """
+    p = rec.get("landlord_portfolio") or {}
+    for field in ("topbusinessaddr", "topcorp"):
+        v = " ".join(str(p.get(field) or "").strip().lower().split())
+        if v:
+            return v
+    return " ".join(str(rec.get("owner_name") or "").strip().lower().split())
+
+
 def main() -> int:
     snap = read(SNAPSHOT, {})
     pool, seen = [], set()
@@ -84,6 +110,11 @@ def main() -> int:
             entry = store[ukey]
             entry["uid"] = rec["listing_uid"]
             entry["addr"] = addr_key(rec) or entry.get("addr", "")
+            # Refreshed, not just set on first write: every hash cached
+            # before the owner check existed carries none, and portfolio
+            # data arrives a cycle after the photo does. Without this the
+            # guard would never fire for an already-hashed photo.
+            entry["owner"] = owner_key(rec) or entry.get("owner", "")
             continue
         try:
             req = urllib.request.Request(url, headers=HEADERS)
@@ -91,25 +122,40 @@ def main() -> int:
                 blob = resp.read(2_500_000)
             fetched += 1
         except Exception:
-            store[ukey] = {"ahash": None, "uid": rec["listing_uid"], "addr": addr_key(rec)}
+            store[ukey] = {"ahash": None, "uid": rec["listing_uid"], "addr": addr_key(rec), "owner": owner_key(rec)}
             continue
-        store[ukey] = {"ahash": ahash(blob), "uid": rec["listing_uid"], "addr": addr_key(rec)}
+        store[ukey] = {"ahash": ahash(blob), "uid": rec["listing_uid"], "addr": addr_key(rec), "owner": owner_key(rec)}
 
     entries = [(k, v) for k, v in store.items() if v.get("ahash")]
     flags: dict[str, str] = {}
+    same_owner = 0
     for i in range(len(entries)):
         for j in range(i + 1, len(entries)):
             a, b = entries[i][1], entries[j][1]
             if not a.get("addr") or not b.get("addr") or a["addr"] == b["addr"]:
                 continue
-            if hamming(a["ahash"], b["ahash"]) <= 4:
-                flags[a["uid"]] = b["uid"]
-                flags[b["uid"]] = a["uid"]
+            if hamming(a["ahash"], b["ahash"]) > 4:
+                continue
+            # Same photo across two buildings the SAME owner holds is a
+            # landlord reusing their own marketing shot, not a cloned
+            # listing — and the flag costs 20 points of confidence.
+            #
+            # Only suppressed when BOTH sides have a known owner and they
+            # match. If either is unknown the flag stands: the photo really
+            # is being reused across addresses, and silence would be the
+            # more dangerous error of the two.
+            oa, ob = a.get("owner") or "", b.get("owner") or ""
+            if oa and ob and oa == ob:
+                same_owner += 1
+                continue
+            flags[a["uid"]] = b["uid"]
+            flags[b["uid"]] = a["uid"]
 
     HASHES.parent.mkdir(parents=True, exist_ok=True)
     HASHES.write_text(json.dumps(store, separators=(",", ":")))
     FLAGS.write_text(json.dumps(flags, separators=(",", ":")))
-    print(f"[photo-hash] {len(store)} hashed (+{fetched} new), {len(flags)} clone flags across addresses")
+    print(f"[photo-hash] {len(store)} hashed (+{fetched} new), {len(flags)} clone flags across addresses"
+          f"{f', {same_owner} same-owner reuse not flagged' if same_owner else ''}")
     return 0
 
 
