@@ -167,6 +167,35 @@ def test_neighbourhood_queries_are_scoped_to_the_right_borough() -> None:
           all("price:-3000" in u for u in by_label.values()), "")
 
 
+def test_the_result_budget_goes_where_the_targets_are() -> None:
+    """Every kept craigslist listing costs a detail fetch, so the cap is a
+    politeness limit. It was split evenly across five boroughs — 125 of the
+    250 fetches went to Queens, the Bronx and Staten Island, which contain
+    no target neighbourhood at all."""
+    dl = load("discover_listings")
+    import json as _json
+    prefs = _json.loads((ROOT / "configs" / "user_preferences.json").read_text())
+    cat = _json.loads((ROOT / "configs" / "source_catalog.json").read_text())
+    src = next(s for s in cat["sources"] if s["source_name"] == "craigslist")
+    caps = {s["label"]: s["result_cap"] for s in dl.build_craigslist_searches(src, prefs)}
+    print("\ncraigslist result budget by borough:")
+    for k, v in caps.items():
+        print(f"     {k:<16}{v}")
+
+    check("Manhattan and Brooklyn get the budget",
+          caps.get("Manhattan", 0) > 60 and caps.get("Brooklyn", 0) > 60, str(caps))
+    check("boroughs with no target get a small sample, not zero",
+          0 < caps.get("Queens", 0) <= 20 and 0 < caps.get("Bronx", 0) <= 20,
+          "the Market page promises the whole net")
+    check("a target borough gets far more than a non-target one",
+          caps.get("Brooklyn", 0) >= 4 * caps.get("Queens", 1))
+    # measured availability on 2026-08-04
+    avail = {"Manhattan": 89, "Brooklyn": 647, "Queens": 303, "Bronx": 83, "Staten Island": 25}
+    total = sum(min(avail.get(k, 0), v) for k, v in caps.items())
+    check("and the total fetch count stays inside the old budget",
+          total <= 250, f"{total} detail fetches vs 250 before")
+
+
 def test_the_published_feed_would_have_caught_it() -> None:
     """A source with zero records must never reach the public feed as healthy."""
     pl = load("public_lens")
@@ -197,6 +226,7 @@ if __name__ == "__main__":
     test_a_source_cannot_pad_its_count_with_index_pages()
     test_a_source_is_never_asked_for_less_than_the_hunt_wants()
     test_neighbourhood_queries_are_scoped_to_the_right_borough()
+    test_the_result_budget_goes_where_the_targets_are()
     test_the_published_feed_would_have_caught_it()
     print()
     if FAILURES:

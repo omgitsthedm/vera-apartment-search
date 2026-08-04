@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from workflow_support import ensure_dir, read_json, utc_now_iso, utc_stamp, write_json, write_text
 
 from config.paths import VERA_ROOT as ROOT, CONFIG_DIR as CONFIG_ROOT, LOG_DIR as LOG_ROOT, LEGACY_STATE_DIR as STATE_ROOT, RAW_DIR
-from config.nta_lookup import BOROUGH_CODE_TO_NAME, borough_of
+from config.nta_lookup import BOROUGH_CODE_TO_NAME, borough_of, target_boroughs
 from config.stage_tracker import write_stage_start, write_stage_end, get_run_id
 from config.anomaly_detector import check_source_anomalies
 from config.source_reliability import record_source_run
@@ -423,11 +423,43 @@ def build_craigslist_searches(source: dict[str, Any], preferences: dict[str, Any
     results from the public sapi.craigslist.org JSON endpoint, which works with plain
     urllib + the browser UA, so that endpoint is now the search data source.
     "batch=3-0-360-0-0" scopes the search to area 3 (newyork).
+
+    RESULT BUDGET. Every kept listing costs a detail fetch, so the per-query
+    cap is a politeness and runtime limit, not an arbitrary one. It was a
+    flat 50 across five boroughs, and measured on 2026-08-04 the sapi had:
+
+        manhattan  89   brooklyn 647   queens 303   bronx 83   staten 25
+
+    1,147 listings returned in five requests, of which 225 were kept and
+    **922 were discarded after they had already been fetched**. Worse, 125
+    of those 250 detail fetches went to Queens, the Bronx and Staten Island
+    — which between them contain not one of the target neighbourhoods.
+
+    So the budget is now allocated rather than divided: most of it to the
+    boroughs the targets actually live in, a real but small sample of the
+    rest so the Market page stays the whole net. Same number of detail
+    fetches, roughly double the in-target coverage.
     """
     query_terms = list(source.get("query_terms") or preferences.get("neighborhoods") or [])
     max_rent = effective_max_rent(source, preferences)
     configured = str(source.get("search_base_url") or "")
     base_url = configured if "sapi.craigslist.org" in configured else CRAIGSLIST_SAPI_BASE
+
+    budget = int(source.get("result_budget") or (int(source.get("max_results_per_query", 50)) * 5))
+    target_codes = {
+        BOROUGH_NAME_TO_SITE.get(BOROUGH_CODE_TO_NAME.get(code, ""), "")
+        for code in target_boroughs(preferences.get("neighborhoods") or [])
+    } - {""}
+    boro_terms = [t for t in query_terms if BOROUGH_NAME_TO_SITE.get(str(t).strip().lower())]
+    in_target = [t for t in boro_terms if BOROUGH_NAME_TO_SITE.get(str(t).strip().lower()) in target_codes]
+    wide_only = [t for t in boro_terms if t not in in_target]
+
+    # 85/15. The wide-net share is deliberately non-zero: "the market, whole"
+    # is a product promise, and a borough sampled thinly still shows up
+    # honestly on the Market page.
+    per_target = int(budget * 0.85 / len(in_target)) if in_target else 0
+    per_wide = max(8, int(budget * 0.15 / len(wide_only))) if wide_only else 0
+
     searches: list[dict[str, str]] = []
     for term in query_terms:
         # Borough-name terms become borough-scoped searches (searchPath=mnh/apa etc.).
@@ -449,10 +481,17 @@ def build_craigslist_searches(source: dict[str, Any], preferences: dict[str, Any
         }
         if not borough_code:
             params["query"] = term
+        if term in in_target:
+            cap = per_target
+        elif term in wide_only:
+            cap = per_wide
+        else:
+            cap = int(source.get("max_results_per_query", 50))
         searches.append(
             {
                 "label": term,
                 "url": f"{base_url}?{urllib.parse.urlencode(params)}",
+                "result_cap": cap,
             }
         )
     return searches
@@ -1208,7 +1247,8 @@ def discover_craigslist_live(
             continue
 
         time.sleep(request_delay_ms / 1000)
-        result_urls = extract_listing_urls(search_html, max_results_per_query)
+        # Per-search cap: the budget is allocated by borough, not split evenly.
+        result_urls = extract_listing_urls(search_html, int(search.get("result_cap") or max_results_per_query))
         kept_for_query = 0
 
         for url in result_urls:
