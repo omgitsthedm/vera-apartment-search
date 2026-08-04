@@ -9,6 +9,88 @@ Component prefixes: **engine** · **dashboard** · **site** (littlefightnyc.com)
 
 ---
 
+## 1.3.0 — 2026-08-04 · "The Cloud Publishes, and Says What It Cannot See"
+
+The fourth release. VERA had been finding real listings in the cloud every
+night and burying every one of them in a 7-day artifact nothing could read;
+the live feed only refreshed when a laptop happened to be awake. This wave
+made the cloud the product, then spent the rest of its time finding out
+what the product had been quietly getting wrong.
+
+### engine
+- **Cloud publish needs no secret.** The nightly sweep force-pushes its feed
+  to an orphan `feed` branch, served by raw.githubusercontent with CORS
+  open, using only the automatic `GITHUB_TOKEN`. The Netlify token gate is
+  gone and no PAT exists — settled determination, recorded in
+  `SOURCE_OF_TRUTH.md`.
+- **One privacy boundary.** `scripts/public_lens.py` is now the single
+  implementation; the dashboard imports it. Verified byte-identical on all
+  three payloads before the switch. `audit_public_payload()` refuses to
+  publish a payload carrying personal fields.
+- **Sources stop asserting success.** All nineteen discovery functions wrote
+  `status: "ok"` unconditionally, and the published feed carried streeteasy
+  as healthy with zero listings. Status now derives from each run's own
+  query outcomes, history-free, so it is right on a machine's first run.
+- **The cloud has a memory.** `state/` is gitignored, so every run started
+  from nothing — silently disabling cloned-photo detection, price history
+  and day-over-day changes. Fourteen stores now persist through the Actions
+  cache, deliberately not a branch: that data has not passed the public lens
+  and the repo is public.
+- **The enrichment layer runs in the cloud at all.** Price memory, photo
+  fingerprints and JustFix landlord portfolios had never once executed there.
+- **The neighbourhood gate had three faults.** The target list was passed
+  through the street-address normaliser, so "Upper East Side" became
+  `upper e side` and five of forty-two targets could never match; a
+  confidently wrong source label survived unchallenged; and NYC's reused
+  names let Flushing pass as Murray Hill.
+- **Sources were asked for less than the hunt wanted.** Five of nine carried
+  a stale $2,500 cap against a $3,000 ceiling. Every listing shortlisted
+  after the fix sat in that missing band.
+- **The result budget goes where the targets are.** Craigslist returns
+  everything in one request; the engine kept 225 of 1,147 and spent half its
+  detail fetches on boroughs holding no target neighbourhood. Reallocated
+  85/15: in-target listings 81 → 136 at the same request count.
+- **Fairness.** All three forensic tells scored a landlord's own ordinary
+  behaviour as fraud — one owner reusing a photo, a template or a leasing
+  phone across their own buildings. They now suppress only when both sides
+  have a known owner and the owners match.
+- **A rate-limited geocoder is retried, not dropped.** 429 was treated like a
+  malformed address, costing the listing its BBL and leaving it with the
+  synthetic risk scores that make it unrecommendable.
+- **Measured and rejected:** reverse-geocoding craigslist map pins returned
+  the correct house number 0 times out of 24. Craigslist offsets pins by
+  design. Written up in `docs/proposals/`.
+
+### site
+- **The app takes the freshest feed, not the first to answer.** It also
+  turned out the pipeline fallback had never worked — no CORS header — so
+  VERA had one origin while appearing to have two.
+- **An LLC is paperwork, not a corporation.** Owner classification used to
+  read any LLC as Corporate, which in New York mislabels a family with one
+  walk-up. It now uses JustFix building count.
+- **The owner's record moved to the Owner tab**, from Records, where a
+  renter looking up their landlord would never find it.
+- **VERA says what it cannot see.** The System page publishes its own
+  verification reach — 13% of the net — and the large-landlord skew that
+  comes with it, computed live so it cannot drift into a comforting fiction.
+- **The 87% it cannot verify get the tools anyway.** Six public records,
+  offered on any unverified listing with a plain sentence on why VERA could
+  not do it, plus write-in lines on the printed field kit for the address
+  the renter gets at the door.
+- Receipts read every origin and distinguish an outage from an empty
+  archive; counters settle instead of freezing at zero in a background tab;
+  the suite now asserts no sideways scroll on all eight routes.
+
+### ops
+- **Zero spend, verified.** Actions is unmetered because the repo is public;
+  the cache sits at 613MB against a 10GB limit; the Hugging Face classifier
+  runs on the runner's own CPU with no API bill. If the repo ever goes
+  private, Actions starts metering — flag it first.
+- Email alerts descoped by the owner. The code is config-absent-safe and
+  simply stays dormant.
+
+---
+
 ## 1.2.0 — 2026-08-04 · "The Verification Layer Tells the Truth"
 
 The campaign that rebuilt VERA around a public product, then spent the
