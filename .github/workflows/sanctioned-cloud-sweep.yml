@@ -18,7 +18,18 @@ name: sanctioned-cloud-sweep
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "30 5 * * *"   # 05:30 UTC — ahead of the Mac's 06:00 sweep
+    # 05:30 UTC. NOTE: the Mac's own nightly is 23:00 America/New_York
+    # (03:00-04:00 UTC depending on DST), so this runs AFTER it, not ahead
+    # of it as an earlier comment claimed.
+    #
+    # Punctuality is not guaranteed and has not yet been observed: on
+    # 2026-08-04 nothing had fired 32 minutes past the slot, with the
+    # workflow state=active and the cron valid on the default branch.
+    # GitHub's scheduled queue is best-effort and most congested at :00
+    # and :30. If it proves chronically late, move to an odd minute
+    # (e.g. "37 5 * * *") or trigger from an external scheduler — both are
+    # schedule changes and need David's authorization.
+    - cron: "30 5 * * *"
 
 jobs:
   sanctioned:
