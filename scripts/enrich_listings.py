@@ -822,6 +822,19 @@ def _main_impl() -> int:
         # somewhere else, the resolved place IS the display neighborhood —
         # source hints routinely carry the search query's neighborhood
         # ("East Village" stamped on a Rosedale, Queens house).
+        # A listing that arrived with NO neighbourhood (saved-search alerts carry
+        # none) passes neighborhood_verified_by_map on the borough alone, so the
+        # override below never fired and the listing kept a null neighbourhood
+        # all the way to the hard filter, which then rejected it as out-of-area.
+        # If GeoSearch resolved a neighbourhood and the listing has none, take it.
+        if reference and not listing.get("neighborhood"):
+            _rh = reference.get("resolved_neighborhood")
+            if _rh and float(reference.get("geosearch_match_confidence") or 0) >= 0.8:
+                listing["neighborhood"] = _rh
+                listing["neighborhood_source"] = listing.get("neighborhood_source") or "geosearch"
+                if reference.get("borough_resolved"):
+                    listing["borough"] = reference["borough_resolved"]
+
         if neighborhood_verified is False and reference:
             resolved_hood = reference.get("resolved_neighborhood")
             resolved_borough = reference.get("borough_resolved")
