@@ -385,6 +385,30 @@ def load_watchlist_set(rows: list[dict[str, Any]], key: str) -> dict[str, dict[s
     return items
 
 
+# Per-unit HPD risk, built and tested but OFF by default.
+#
+# The shipped formula saturates: on 2026-08-04 six of seven buildings with
+# real records scored exactly 100.0, including one with ZERO serious open
+# violations, because 19 ordinary violations alone reach the cap and nothing
+# is normalised by building size. The alert gate rejects anything over 65, so
+# it rejects buildings for having been verified while unverified ones sit at
+# the synthetic 50.0 and pass.
+#
+# Turning this on changes which listings are recommended and emailed, which
+# AGENTS.md reserves to David. It therefore stays behind an explicit switch:
+#   VERA_HPD_PER_UNIT=1   (or "hpd_per_unit": true in configs/user_preferences.json)
+# Evidence and reasoning: docs/proposals/hpd-risk-calibration.md
+def _hpd_per_unit_enabled() -> bool:
+    import os
+    if os.environ.get("VERA_HPD_PER_UNIT") == "1":
+        return True
+    try:
+        prefs = read_json(CONFIG_ROOT / "user_preferences.json", default={}) or {}
+        return bool(prefs.get("hpd_per_unit"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def hpd_risk_score(reference: dict[str, Any] | None) -> float:
     if not reference:
         return 50.0
@@ -394,6 +418,25 @@ def hpd_risk_score(reference: dict[str, Any] | None) -> float:
     heat = float(reference.get("heat_hot_water_complaints_3y") or 0)
     bedbug = float(reference.get("bedbug_reports_3y") or 0)
     serious_open = float(reference.get("serious_open_violations") or 0)
+
+    units = float(reference.get("unit_count") or 0)
+    if _hpd_per_unit_enabled() and units > 0:
+        # Rates, not raw counts: 7 serious violations across 799 apartments is
+        # a better building than 3 across 89. Bedbugs stay absolute — they are
+        # rare enough that one filing matters regardless of size.
+        return round(
+            min(
+                100.0,
+                (serious_open / units) * 250.0
+                + (heat / units) * 60.0
+                + (litigation / units) * 120.0
+                + (violations / units) * 25.0
+                + (complaints / units) * 8.0
+                + bedbug * 6.0,
+            ),
+            1,
+        )
+
     return round(
         min(
             100.0,
