@@ -41,3 +41,19 @@ contract: `configs/snapshot_schema.md`. Agent rules: `AGENTS.md`.
 Built by [Little Fight NYC](https://littlefightnyc.com). AGPL-3.0 intent
 for code; data derivations carry their sources' terms (MTA GTFS, NYC
 Open Data, StreetEasy public CSVs).
+
+## Credits
+
+VERA stands on public data and open work:
+
+- **NYC Open Data** — HPD violations, complaints and registrations, DOB
+  records, 311, PLUTO, ACRIS.
+- **NYC Department of City Planning** — NTA2020 neighbourhood boundaries,
+  and the keyless [GeoSearch](https://geosearch.planninglabs.nyc/) geocoder.
+- **MTA** — GTFS static schedules for stations and ride times.
+- **[JustFix](https://whoownswhat.justfix.org/)** — the Who Owns What API,
+  which links buildings into landlord portfolios.
+- **AI-photo detection** — [`umm-maybe/AI-image-detector`](https://huggingface.co/umm-maybe/AI-image-detector),
+  licensed CC BY 4.0.
+- **[MapLibre GL](https://maplibre.org/)** (BSD-3) over
+  **[OpenFreeMap](https://openfreemap.org/)** tiles, from OpenStreetMap data.

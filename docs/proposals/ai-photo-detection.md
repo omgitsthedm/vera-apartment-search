@@ -29,7 +29,7 @@ metadata. Two consequences, both now enforced in code:
    email-ingestion path, where images arrive closer to their source — VERA
    catches it with certainty instead of a guess.
 
-## Tier 2 — a classifier (NOT shipped)
+## Tier 2 — a classifier (SHIPPED — this section was previously wrong)
 
 Surveyed the public Hugging Face detectors on 2026-08-03:
 
@@ -42,7 +42,9 @@ Surveyed the public Hugging Face detectors on 2026-08-03:
 So the only ONNX-ready option is licence-blocked, and the only clean licence
 needs torch on both the Mac *and* every GitHub Actions run.
 
-**Recommendation: don't.** The cost is ~2.5GB of dependencies and a heavy
+**What actually shipped:** `scripts/detect_ai_photos.py` runs `umm-maybe/AI-image-detector` (**cc-by-4.0** — commercial use permitted *with attribution*, unlike the non-commercial `Organika/sdxl-detector` this file worried about). transformers + CPU torch are installed by the cloud job only, with the HF model cached between runs; the Mac skips it when transformers is absent. Output lands as `ai_photo_probability` / `ai_photo_suspect`, is **excluded from scoring**, and the ledger states it is probabilistic and not proof. The reasoning below was the argument *against*, kept because the false-positive concern it raises is real:
+
+**The original caution:** The cost is ~2.5GB of dependencies and a heavy
 cold start per cloud run; the benefit is a probability that — per the
 honesty spine and David's own weighting decision — would be **excluded from
 scoring** and shown only as a soft signal. Worse, the false-positive
@@ -57,3 +59,11 @@ outside git (Netlify large media or an HF model repo under his account),
 and run inference with `onnxruntime` alone (~50MB) in both environments —
 surfaced as "AI-photo likelihood: N%" with virtual-staging caveat text, and
 still excluded from the score.
+
+
+## Licence obligation (added 2026-08-04)
+
+cc-by-4.0 requires attribution, and the repo carried none. The model is now
+credited in README.md and on the app's System page. If the model is ever
+swapped, the attribution must move with it — and any replacement must be
+checked for a non-commercial clause, which would disqualify it here.
