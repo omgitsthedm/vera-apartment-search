@@ -76,6 +76,16 @@ jobs:
           python-version: "3.12"
       - name: Deps
         run: pip install --quiet pillow certifi
+      # The first cloud publish (2026-08-04) shipped without either of these
+      # and the Market page and every commute time came back empty: the
+      # sanctioned job produces them, but only into an artifact this job
+      # cannot see. Both are official CSVs / GTFS and probe clean from
+      # datacenter IPs, so this job just produces its own. Non-fatal — a
+      # source outage should degrade the feed honestly, not block it.
+      - name: Market context (StreetEasy official CSVs)
+        run: python3 scripts/refresh_market_context.py || echo "[WARN] market context unavailable — feed publishes without it"
+      - name: Transit universe (MTA GTFS static)
+        run: python3 scripts/refresh_transit_gtfs.py || echo "[WARN] transit universe unavailable — feed publishes without commute times"
       - name: HF model cache
         uses: actions/cache@v4
         with:

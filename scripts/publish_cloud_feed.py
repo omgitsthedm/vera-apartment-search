@@ -137,6 +137,15 @@ def main() -> int:
         # Not a failure: an honest empty run is a real outcome and the app
         # says so. But it should never pass silently in the log.
         print("[WARN] published an EMPTY pool — check source health", file=sys.stderr)
+
+    # Whole-market aggregates and commute times are separate layers, and the
+    # first cloud publish silently shipped without either. Missing them is
+    # not fatal — the feed is still true — but it must be visible in the log
+    # rather than discovered later as a blank Market page.
+    for layer, present in (("market_context", public.get("market_context")),
+                           ("transit_tables", public.get("transit_tables"))):
+        if not present:
+            print(f"[WARN] {layer} missing — that page will be empty", file=sys.stderr)
     return 0
 
 
