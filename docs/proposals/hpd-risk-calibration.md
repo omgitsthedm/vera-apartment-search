@@ -40,8 +40,10 @@ Two problems compound:
 2. **It ignores building size.** 5 Tudor City has ~799 apartments;
    48 W 138 has ~89. Seven serious violations across 799 units is a far
    better record than three across 89, and the formula scores them
-   identically. (`apt_count` is on the engine record but is not published
-   to the feed, so the app cannot show this either.)
+   identically. (Correction to an earlier draft of this file: the field is
+   `unit_count`, and it **is** published — 5 Tudor City carries
+   `unit_count: 799`. The data was there all along; only the formula and the
+   UI ignored it.)
 
 ## What it costs
 
