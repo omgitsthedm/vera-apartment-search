@@ -96,14 +96,25 @@ def cheap_filter_status(listing: dict[str, Any], preferences: dict[str, Any]) ->
     max_rent = preferences.get("max_rent")
     beds = listing.get("beds")
 
+    # Saved-search alerts arrive pre-filtered by the portal itself — David set
+    # the neighbourhoods and unit types when he saved the search, so anything
+    # that fires already matches. They also carry no neighbourhood or bed count
+    # and no coordinates, so this cheap pre-filter cannot judge them and would
+    # reject 100% of them on missing data alone. Let unknowns through to
+    # enrichment, where GeoSearch supplies a real address and neighbourhood and
+    # the hard filter applies the actual criteria with actual data.
+    prefiltered_source = str(listing.get("source_name") or "") == "email_alerts"
+
     if allowed_neighborhoods and not neighborhood_matches(
         listing.get("neighborhood"), allowed_neighborhoods
     ):
-        failures.append("outside target neighborhoods")
+        if not (prefiltered_source and not listing.get("neighborhood")):
+            failures.append("outside target neighborhoods")
     if rent is None or (max_rent is not None and rent > max_rent):
         failures.append("above max rent or rent missing")
     if beds not in (0, 0.0, 1, 1.0):
-        failures.append("not studio or 1br")
+        if not (prefiltered_source and beds is None):
+            failures.append("not studio or 1br")
     if listing.get("room_share_flag"):
         failures.append("room-share signal")
     if listing.get("sublet_flag") and listing.get("search_mode") != SEARCH_MODE_BRIDGE:
