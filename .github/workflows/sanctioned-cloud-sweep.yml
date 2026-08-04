@@ -149,6 +149,45 @@ jobs:
       - name: AI-photo pass (probabilistic, HF)
         if: always()
         run: python3 scripts/detect_ai_photos.py || echo "[WARN] ai-photo pass failed (non-fatal)"
+
+      # The layer that makes VERA more than an aggregator, and which had
+      # never once run in the cloud: run_daily.sh stops at build_snapshot,
+      # and these live in the Mac's run_nightly_autonomous.sh. So the cloud
+      # feed — now the primary path — carried no cloned-photo detection, no
+      # days-on-market, and no answer to the question the whole thesis rests
+      # on: what does this owner do to their OTHER tenants?
+      #
+      # Each writes state that build_snapshot folds in on the NEXT compose,
+      # which is why they were pointless here until the run-to-run cache
+      # landed earlier today. Non-fatal, in the Mac's own order.
+      #
+      # scan_photo_provenance is deliberately NOT here: it was measured at
+      # 0/60 photos carrying any metadata, because portals re-encode and
+      # strip EXIF. It would cost a download per photo to learn nothing.
+      - name: Price memory (true days-on-market)
+        if: always()
+        run: python3 scripts/record_price_history.py || echo "[WARN] price history failed (non-fatal)"
+      - name: Cloned-photo fingerprints (the scam wall's memory)
+        if: always()
+        run: python3 scripts/refresh_photo_hashes.py || echo "[WARN] photo hashing failed (non-fatal)"
+      - name: Landlord portfolios (JustFix Who Owns What)
+        if: always()
+        run: python3 scripts/refresh_landlord_portfolios.py || echo "[WARN] portfolio refresh failed (non-fatal)"
+      - name: What the enrichment layer knows now
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          for name, label in (("price_history", "listings with a price path"),
+                              ("photo_hashes", "photos fingerprinted"),
+                              ("photo_clone_flags", "cloned-photo flags"),
+                              ("landlord_portfolios", "landlord portfolios")):
+              p = pathlib.Path("state") / f"{name}.json"
+              try:
+                  print(f"  {label}: {len(json.loads(p.read_text()))}")
+              except Exception:
+                  print(f"  {label}: none yet")
+          PY
       - name: Report the net
         if: always()
         run: |
