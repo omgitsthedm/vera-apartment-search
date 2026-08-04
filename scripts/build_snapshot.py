@@ -198,6 +198,9 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
     # true of ~100% of portal photos (they re-encode) and would flag every
     # honest listing, so it is deliberately never published.
     photo_prov = read_json(durable_state / "photo_provenance.json", default={})
+    # Portfolio-level landlord record (JustFix Who Owns What, by BBL):
+    # what this owner does to their OTHER tenants.
+    portfolios = read_json(durable_state / "landlord_portfolios.json", default={})
     ai_flags = read_json(durable_state / "ai_photo_flags.json", default={})
 
     # The real subway universe (MTA GTFS static, derived weekly). When
@@ -323,6 +326,9 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
         # perceptual-hash clones (refresh_photo_hashes.py) join the hotlink check
         if photo_flags.get(_uid2):
             record["photo_clone_suspect"] = True
+        _pf = portfolios.get(str(record.get("bbl") or "").strip())
+        if _pf:
+            record["landlord_portfolio"] = _pf
         _pv = photo_prov.get(_uid2) or {}
         if _pv.get("declares_ai"):
             record["photo_declares_ai"] = _pv.get("generator_marker") or True

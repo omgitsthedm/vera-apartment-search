@@ -123,6 +123,7 @@ with open('$STATE_DIR/latest_run.json', 'w') as f:
     python3 "$ROOT/scripts/record_price_history.py" || echo "[WARN] price history record failed (non-fatal)"
     python3 "$ROOT/scripts/refresh_photo_hashes.py" || echo "[WARN] photo hashing failed (non-fatal)"
     python3 "$ROOT/scripts/scan_photo_provenance.py" || echo "[WARN] photo provenance scan failed (non-fatal)"
+    python3 "$ROOT/scripts/refresh_landlord_portfolios.py" || echo "[WARN] landlord portfolio refresh failed (non-fatal)"
   elif [ "$PIPELINE_OK" = "true" ] && [ "$PUBLISH_OK" = "false" ]; then
     OUTCOME="pipeline_ok_publish_failed"
   else
