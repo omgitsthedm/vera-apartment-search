@@ -179,6 +179,44 @@ def listing_sections(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def classify_source_status(raw_status: str | None, skip_reason: str,
+                           records_found: int, prior: list[int]) -> str:
+    """Decide how healthy a source really is, from this run plus its history.
+
+    Extracted from the snapshot loop so the rule can be tested directly.
+    It was inline, and the only test that touched it asserted on the source
+    text — which proves the code is shaped a certain way, not that it
+    decides anything correctly.
+
+    `prior` is the record counts of that source's previous successful runs.
+    It is empty on every cloud run, because state/ is not in the checkout —
+    which is precisely the case the last branch exists for.
+    """
+    if raw_status == "skipped":
+        # A source that was never contacted is not "broken". The old one-liner
+        # classified every skipped entry as broken purely because a skip carries
+        # no record_count — which labelled 9 deliberately-disabled sources as
+        # failures and, far worse, left craigslist green while it went 229 -> 0.
+        return "disabled" if "disab" in skip_reason or "not_feasible" in skip_reason else "not_scheduled"
+    if raw_status == "ok":
+        baseline = (sum(prior) / len(prior)) if prior else 0
+        if baseline >= 5 and records_found == 0:
+            return "failing"        # produced nothing where it reliably produced records
+        if baseline >= 20 and records_found < baseline * 0.4:
+            return "degraded"       # still returning, but a long way down
+        if records_found == 0 and not prior:
+            # No history, so neither guard above can fire — the normal case in
+            # the cloud. This is how streeteasy came to read green in the
+            # published feed while contributing zero listings. A source that
+            # ran and returned nothing is not healthy just because nobody can
+            # remember it doing better.
+            return "degraded"
+        return "healthy"
+    if records_found > 0:
+        return "partial"
+    return "failing"
+
+
 def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: list[dict[str, Any]], parse_failed_rows: list[dict[str, Any]], history: dict[str, Any], source_health: dict[str, Any] | None = None) -> dict[str, list[dict[str, Any]]]:
     # Price memory: recorded post-run by record_price_history.py, attached on
     # the next compose. Gives every listing its price path and honest
@@ -524,30 +562,8 @@ def build_snapshot() -> tuple[dict[str, Any], bool]:
         # failures and, far worse, left craigslist green while it went 229 -> 0.
         raw_status = source.get("status")
         skip_reason = str(source.get("reason") or "").lower()
-        if raw_status == "skipped":
-            status = "disabled" if "disab" in skip_reason or "not_feasible" in skip_reason else "not_scheduled"
-        elif raw_status == "ok":
-            # Healthy unless this run collapsed against its own recent history.
-            prior = [t.get("records", 0) for t in all_trends.get(sname, [])[:-1] if t.get("status") == "ok"]
-            baseline = (sum(prior) / len(prior)) if prior else 0
-            if baseline >= 5 and records_found == 0:
-                status = "failing"      # produced nothing where it reliably produced records
-            elif baseline >= 20 and records_found < baseline * 0.4:
-                status = "degraded"     # still returning, but a long way down
-            elif records_found == 0 and not prior:
-                # No history to compare against, so neither guard above can
-                # fire. That is the normal case in the cloud, where every run
-                # starts from a fresh checkout — which is how streeteasy came
-                # to read green in the published feed while contributing zero
-                # listings. A source that ran and returned nothing is not
-                # healthy just because nobody can remember it doing better.
-                status = "degraded"
-            else:
-                status = "healthy"
-        elif records_found > 0:
-            status = "partial"
-        else:
-            status = "failing"
+        prior = [t.get("records", 0) for t in all_trends.get(sname, [])[:-1] if t.get("status") == "ok"]
+        status = classify_source_status(raw_status, skip_reason, records_found, prior)
 
         trends = all_trends.get(sname, [])
         rate = success_rate_from_trends(trends)
