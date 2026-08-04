@@ -9,6 +9,68 @@ Component prefixes: **engine** · **dashboard** · **site** (littlefightnyc.com)
 
 ---
 
+## 1.2.0 — 2026-08-04 · "The Verification Layer Tells the Truth"
+
+The campaign that rebuilt VERA around a public product, then spent the
+last stretch finding out why its core output was empty. Both causes were
+in the plumbing, not the market.
+
+### engine
+- **Empty drop, cause 1: no retry on city outages.** A sweep's building
+  lookups all returned HTTP 503, so no listing earned a BBL, risk scores
+  fell back to the synthetic 50/45 defaults, `has_synthetic_risk_scores()`
+  flagged every survivor and the scorer correctly refused to recommend
+  anything. An earlier sweep the same day matched 17 buildings; the only
+  difference was upstream weather. `read_json_url` now retries 5xx and
+  timeouts with backoff (1.5s/3s/6s) and still raises 4xx immediately.
+- **Empty drop, cause 2: borough-as-neighborhood.** 189 of 248 listings
+  carried a borough ("Brooklyn") in the neighborhood field, so the cheap
+  filter rejected them as "outside target neighborhoods" and they never
+  reached a city-record lookup at all. `config/nta_lookup.py` resolves
+  those coordinates to the true NTA2020 neighborhood, and both filters now
+  match compound city names ("Upper East Side-Lenox Hill-Roosevelt
+  Island", "East Harlem (South)") that exact matching could never hit.
+  **Verification coverage 18 → 51 listings per sweep.** Target list
+  unchanged; out-of-area listings still fail.
+- **Full-city geography.** `build_nta_polygons.py` derives all 197
+  residential NTAs from DCP NTA2020 (simplified ~22m, 167KB), replacing a
+  70-hood focus subset. Borough-only resolution 62 → 167.
+- **records_health** published end-to-end so a dead verification layer is
+  never mistaken for a quiet day.
+- **Forensic tells now count** (approved weights): relist −10, contact
+  reuse −15, description clone −25, photo clone −20, capped −45, each
+  deduction named on the listing.
+- **Photo forensics**: perceptual hashing catches re-uploaded stolen
+  photos; provenance scanning reads C2PA/XMP/EXIF generator markers as
+  fact. An ML classifier was deliberately declined — see
+  `docs/proposals/ai-photo-detection.md`.
+- **Real transit**: MTA GTFS static supplies 496 stations and scheduled
+  ride times, so commute minutes are quoted rather than invented.
+- **Cloud-daily proven**: the full pipeline discovered 233 listings on
+  GitHub runners (94% of local yield). Craigslist's API serves datacenter
+  IPs fine; only renthop/leasebreak refuse.
+- **Source honesty**: nybits, nooklyn and Housing Connect answered 200
+  with JavaScript shells and yielded zero while reading green. Disabled
+  with an explicit status; per-source `record_count` now published.
+- Email-alert ingestion and Reddit OAuth are wired and config-absent-safe,
+  awaiting credentials.
+
+### site
+- Ground-up rebuild: the daily drop, Steward Grades cited to HPD/DOB/311,
+  Receipts archive, printable field kit, corrections channel, fair-housing
+  statement, move-in ledger.
+- **A real map**: MapLibre GL over OpenFreeMap vector tiles, listings as
+  living markers, the hand-drawn city kept as offline fallback.
+- One spring-based motion language across every surface, reduced-motion
+  respected throughout.
+- 89 in-page acceptance checks.
+
+### ops
+- Sanctioned cloud sweep runs daily on GitHub Actions; cloud publish
+  awaits repository secrets.
+
+---
+
 ## 1.1.0 — 2026-07-23 · "The Reviewed Building"
 
 ### engine
