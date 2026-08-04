@@ -133,9 +133,14 @@ jobs:
             state/photo_clone_flags.json
             state/landlord_portfolios.json
             state/ai_photo_flags.json
-            state/listing_history.json
-            state/seen_cluster_ids.json
             state/daily_changes
+            # NOT state/ — config/paths.py maps LEGACY_STATE_DIR to
+            # cache/state, and normalize_listings, build_snapshot and
+            # score_listings all import it as STATE_ROOT. These two are
+            # written there. Cached under state/ they restored as absent
+            # while the file sat in cache/state the whole time.
+            cache/state/listing_history.json
+            cache/state/seen_cluster_ids.json
           key: vera-state-${{ github.run_id }}
           restore-keys: vera-state-
       - name: What it remembered
@@ -145,6 +150,8 @@ jobs:
           for name in ("source_trends", "price_history", "photo_hashes", "change_history",
                        "ai_photo_flags", "listing_history", "landlord_portfolios"):
               p = pathlib.Path("state") / f"{name}.json"
+              if not p.exists():
+                  p = pathlib.Path("cache/state") / f"{name}.json"
               if not p.exists():
                   print(f"  {name}: absent — first run, or the cache expired")
                   continue
@@ -202,6 +209,8 @@ jobs:
                               ("photo_clone_flags", "cloned-photo flags"),
                               ("landlord_portfolios", "landlord portfolios")):
               p = pathlib.Path("state") / f"{name}.json"
+              if not p.exists():
+                  p = pathlib.Path("cache/state") / f"{name}.json"
               try:
                   print(f"  {label}: {len(json.loads(p.read_text()))}")
               except Exception:
@@ -251,9 +260,14 @@ jobs:
             state/photo_clone_flags.json
             state/landlord_portfolios.json
             state/ai_photo_flags.json
-            state/listing_history.json
-            state/seen_cluster_ids.json
             state/daily_changes
+            # NOT state/ — config/paths.py maps LEGACY_STATE_DIR to
+            # cache/state, and normalize_listings, build_snapshot and
+            # score_listings all import it as STATE_ROOT. These two are
+            # written there. Cached under state/ they restored as absent
+            # while the file sat in cache/state the whole time.
+            cache/state/listing_history.json
+            cache/state/seen_cluster_ids.json
           key: vera-state-${{ github.run_id }}
 
       # ── Publish. No secrets in this chain. ──────────────────────────
