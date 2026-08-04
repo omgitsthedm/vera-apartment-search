@@ -22,14 +22,23 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-GEO_PATH = Path(__file__).resolve().parent / "geo" / "nta_hoods.json"
+GEO_DIR = Path(__file__).resolve().parent / "geo"
+# Full city coverage first (all 197 residential NTAs, built by
+# scripts/build_nta_polygons.py); the app's focus-area subset is the
+# fallback so this still works if the full file is absent.
+GEO_PATHS = (GEO_DIR / "nta_hoods_full.json", GEO_DIR / "nta_hoods.json")
 
 
 @lru_cache(maxsize=1)
 def _hoods() -> list[dict[str, Any]]:
-    try:
-        data = json.loads(GEO_PATH.read_text())
-    except (OSError, json.JSONDecodeError):
+    data = None
+    for path in GEO_PATHS:
+        try:
+            data = json.loads(path.read_text())
+            break
+        except (OSError, json.JSONDecodeError):
+            continue
+    if data is None:
         return []
     out = []
     for h in data.get("hoods") or []:
