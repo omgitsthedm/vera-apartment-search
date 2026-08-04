@@ -103,6 +103,20 @@ def test_no_history_is_not_a_clean_bill_of_health() -> None:
           cls("error", "", 0, []) == "failing")
 
 
+def test_a_source_cannot_pad_its_count_with_index_pages() -> None:
+    """The subtler version of a green-but-empty source: one that reports
+    records which are not listings at all."""
+    dl = load("discover_listings")
+    junk = dl.is_index_page_not_a_listing
+    print("\nindex pages vs listings:")
+    check("a page with no price is not a listing", junk(None, "Listings") is True)
+    check("even when it carried a bed count from a card on it",
+          junk(None, "Listings") is True, "/listings/Austin came through with beds=5")
+    check("a priced listing is kept", junk(2200, "Cozy 1BR in Greenpoint") is False)
+    check("a cheap one too — the rule is about presence, not amount",
+          junk(0.0, "") is False, "0 is a price; None is not a listing")
+
+
 def test_the_published_feed_would_have_caught_it() -> None:
     """A source with zero records must never reach the public feed as healthy."""
     pl = load("public_lens")
@@ -130,6 +144,7 @@ def test_the_published_feed_would_have_caught_it() -> None:
 if __name__ == "__main__":
     test_status_reflects_what_happened()
     test_no_history_is_not_a_clean_bill_of_health()
+    test_a_source_cannot_pad_its_count_with_index_pages()
     test_the_published_feed_would_have_caught_it()
     print()
     if FAILURES:

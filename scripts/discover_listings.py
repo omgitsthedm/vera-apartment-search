@@ -1320,6 +1320,30 @@ def discover_craigslist_live(
 # Unconventional source adapters
 # ---------------------------------------------------------------------------
 
+def is_index_page_not_a_listing(price: Any, title: str = "") -> bool:
+    """True when a fetched 'detail' page is really a site index page.
+
+    LEASEBREAK_LISTING_RE matches any href under /listings/, which includes
+    leasebreak's own region navigation. On 2026-08-04 that put ten records in
+    the pool — /listings/Manhattan, /listings/Bronx, /listings/Austin,
+    /listings/New+Jersey, /listings/Westchester and more — every one titled
+    "Listings", none with a price, one carrying a street address in Austin,
+    Texas. The source reported ok with record_count 10 while contributing
+    nothing usable, which reads worse than reporting zero.
+
+    Price is the discriminator, not bed count: an index page lists other
+    apartments, so a stray "3 Bed" from a card on it is enough to make the
+    page look real — /listings/Austin came through with beds=5. A real
+    listing prices its unit, and a record with no rent is rejected downstream
+    regardless, so this drops no real lead.
+
+    Content-based rather than URL-shaped on purpose: leasebreak 403s both the
+    runners and this machine, so the true listing-URL pattern cannot be
+    confirmed, and guessing it could silently reject everything.
+    """
+    return price is None
+
+
 LEASEBREAK_LISTING_RE = re.compile(
     r'<a[^>]+href="(/listings/[^"]+)"[^>]*>',
     re.I,
@@ -1353,6 +1377,7 @@ def discover_leasebreak_live(
     records_by_id: dict[str, dict[str, Any]] = {}
     cache_hits = 0
     fresh_fetches = 0
+    skipped_index_pages = 0
     query_summaries: list[dict[str, Any]] = []
 
     for borough in boroughs:
@@ -1404,6 +1429,35 @@ def discover_leasebreak_live(
                 beds = int(beds_match.group(1)) if beds_match else None
                 if "studio" in f"{title} {body}".lower():
                     beds = 0
+
+                # LEASEBREAK_LISTING_RE matches any href under /listings/,
+                # which includes the site's own region navigation —
+                # /listings/Manhattan, /listings/Queens, and on 2026-08-04
+                # /listings/Austin, /listings/New+Jersey, /listings/Westchester.
+                # Every one was fetched as if it were an apartment and emitted
+                # as a record: ten of them, all titled "Listings", none with a
+                # price, one carrying a street address in Austin, Texas. The
+                # source reported ok with record_count 10 and contributed
+                # nothing, which is worse than reporting zero.
+                #
+                # Checked on content rather than URL shape because the real
+                # listing-URL pattern cannot be confirmed from here (leasebreak
+                # 403s this machine as well as the runners). An index page has
+                # no price and no bed count; a real listing has at least one.
+                # Price alone is the discriminator. Bed count is not: an index
+                # page lists other apartments, so a stray "3 Bed" from one of
+                # the cards on it is enough to make the page look real —
+                # /listings/Austin came through carrying beds=5. A leasebreak
+                # detail page always prices the unit, and a record with no rent
+                # is rejected downstream anyway, so this loses no real lead.
+                if is_index_page_not_a_listing(price, title):
+                    log_lines.append(
+                        f"{source_name}: {detail_url} carries no price — index page, not a "
+                        f"listing (title {title!r}) — not emitting it"
+                    )
+                    skipped_index_pages += 1
+                    time.sleep(request_delay_ms / 1000)
+                    continue
                 address_lines = [line.strip() for line in body.splitlines() if line.strip()]
                 address = extract_address(address_lines, {})
                 phone = extract_phone(body)
@@ -1445,11 +1499,25 @@ def discover_leasebreak_live(
             if isinstance(record.get("price"), (int, float)) and record["price"] > max_rent:
                 continue
 
+            # Also applied to CACHED records, not just freshly parsed ones:
+            # the cache already holds the index pages this run would have
+            # rejected, and a 12-hour TTL would have kept replaying them.
+            if is_index_page_not_a_listing(record.get("price"), record.get("title") or ""):
+                skipped_index_pages += 1
+                cache.pop(listing_id, None)
+                continue
+
             records_by_id[listing_id] = record
             kept += 1
 
         query_summaries.append({"query": borough, "status": "ok", "result_count": kept})
         log_lines.append(f"{source_name}: '{borough}' kept {kept} listings")
+
+    if skipped_index_pages:
+        log_lines.append(
+            f"{source_name}: dropped {skipped_index_pages} index page(s) that carried "
+            f"neither a price nor a bed count"
+        )
 
     records = list(records_by_id.values())
     snapshot_payload = {
@@ -1462,6 +1530,7 @@ def discover_leasebreak_live(
         "query_summaries": query_summaries,
         "cache_hits": cache_hits,
         "fresh_fetches": fresh_fetches,
+        "skipped_index_pages": skipped_index_pages,
     }
     snapshot_path = output_dir / f"{source_name}_snapshot_{RUN_STAMP}.json"
     write_json(snapshot_path, snapshot_payload)
