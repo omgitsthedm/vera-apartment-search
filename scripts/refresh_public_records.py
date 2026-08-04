@@ -487,6 +487,39 @@ def live_reference_from_sources(listing: dict[str, Any], geo: dict[str, Any]) ->
         (registration_row or {}).get("registrationid") or (building_row or {}).get("registrationid"),
     )
 
+    # A geocoder handed a weak address will happily return a park, a school,
+    # or a playground — 2026-08-04's reference layer held "morningside pg"
+    # (NYC Dept of Parks), "st nicholas pg s" and "hamilton heights school"
+    # among its 29 matches. No listing had picked one up yet, but a park's
+    # violation file must never be able to attach to an apartment and be
+    # printed as that building's record. Reject matches whose HPD owner is a
+    # government parks or education agency; NYCHA stays, because NYCHA
+    # buildings are genuinely residential.
+    _owner = str(
+        (registration_row or {}).get("ownername")
+        or (building_row or {}).get("ownername")
+        or (registration_row or {}).get("owner_name")
+        or ""
+    ).upper()
+    _non_residential_owner = any(
+        token in _owner
+        for token in ("PARKS AND RECREATION", "DEPARTMENT OF PARKS", "DEPT OF PARKS",
+                      "DEPARTMENT OF EDUCATION", "DEPT OF EDUCATION", "BOARD OF EDUCATION")
+    )
+    if _non_residential_owner:
+        return {
+            "building_address": building_address(listing.get("address_normalized") or ""),
+            "lookup_status": "no_match",
+            "lookup_source": "nyc_geosearch_plus_open_data",
+            "lookup_refreshed_at": utc_now_iso(),
+            "parser_version": PARSER_VERSION,
+            "notes": (
+                f"GeoSearch resolved this address to a non-residential property owned by "
+                f"'{_owner.title()}' — a park or school, not an apartment building. Rejected "
+                "rather than attach its record to a listing."
+            ),
+        }
+
     lookup_status = "matched" if (building_row or registration_row or bbl or bin_value) else "no_match"
     notes = (
         "Building joined through NYC GeoSearch with BBL/BIN-first lookups. "
