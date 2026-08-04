@@ -1,64 +1,46 @@
-# The feed is 1.68 MB, and that is the whole page
+# The feed is 122 KB on the wire — I measured the wrong thing
 
-**Measured:** 2026-08-04 · **Status:** measured and diagnosed; no change made
+**Measured:** 2026-08-04 · **Status:** CORRECTED. The problem this file
+originally described does not exist in production.
 
-## What the page actually costs
+## The correction
 
-Loading `/vera/` transfers **1,855 KB**, and **1,682 KB of it is
-`public.json`** — ninety-one percent. Everything else is rounding: all the
-JavaScript, CSS and fonts together come to under 5 KB transferred (they
-cache well), and the neighbourhood polygons are 168 KB.
+An earlier version of this document claimed `/vera/` transfers 1.86 MB, that
+`public.json` was 91% of it, and that an architectural refactor was "the
+single biggest remaining UX improvement available".
 
-On a phone over cellular that is several seconds before anything appears
-beyond the shell — for a product whose whole promise is a quick honest look
-at eight apartments.
+That was measured against the **localhost dev server**, which serves the
+staged feed uncompressed, and generalised to production without checking.
 
-## Where the weight is
+Production serves it Brotli-compressed:
 
-| Section | Size |
-|---|---|
-| `pool` (256 listings, ~5.8 KB each) | 1,476 KB |
-| `manual_review` | 121 KB |
-| `shortlist` | 25 KB |
-| `transit_tables` | 19 KB |
-| `market_context` | 16 KB |
+```
+raw JSON                1,722,168 bytes   (1.72 MB)
+on the wire (br)          124,510 bytes   (122 KB)     -93%
+```
 
-Heaviest per-listing fields across the pool:
+`content-encoding: br` is present both on the feed origin
+(vera-pipeline.netlify.app) and through the littlefightnyc.com proxy.
 
-| Field | Total |
-|---|---|
-| `score_explanation_lines` | 82 KB |
-| `what_to_verify_before_applying` | 82 KB |
-| `image_urls` | 63 KB |
-| `why_this_listing` | 58 KB |
-| `component_scores` | 51 KB |
-| `trust_caveats` | 32 KB |
+**122 KB is a perfectly reasonable payload** for 256 fully-verified listings
+with their records, scores, reasoning and photo URLs. It is roughly one
+mid-sized photograph. There is no first-load crisis, and the light-index
+refactor is not needed — it would have been meaningful work solving an
+imaginary problem.
 
-## The obvious win, and why I did not take it
+## What still stands
 
-`manual_review` and `shortlist` are **complete duplicates** — every one of
-their 19 and 4 entries already appears in `pool`, verified by uid. That is
-146 KB shipped twice on every load.
+The 211 KB of owner-only fields removed from the public lens
+(`PUBLIC_DROP_FIELDS` in the dashboard's `make_public_data.py`) remains
+correct on its own terms: those fields were grep-verified as never read by
+any app module, and shipping data nobody reads is wrong regardless of how
+well it compresses. The saving is real but modest once compressed — call it
+15–20 KB rather than 211 KB.
 
-But they are not dead: `vera-app.js` uses them as a **fallback pool** when
-`pool` is absent. Deleting them saves 9% and silently removes a safety net
-that exists for feeds published before `pool` did. That is a bad trade to
-make without the owner, so it is written down instead of done.
+## The lesson worth keeping
 
-**If David wants it:** publish them as uid-only references, and have
-`make_public_data` guarantee `pool` is always present so the fallback is
-provably unnecessary. Roughly 146 KB for half an hour of care.
-
-## The larger opportunity
-
-The real fix is architectural: the drop needs at most 8 listings, Browse
-needs 256 rows of about fifteen fields, and the ledger needs everything —
-but only for the one listing being read. A light index plus per-listing
-detail fetched on open would cut first load by something like 80%.
-
-That is a genuine refactor with a real regression surface (offline
-caching, the service worker's feed strategy, deep links that open a ledger
-before any index has loaded). It should be planned deliberately, not
-squeezed in — but it is the single biggest remaining UX improvement
-available, and it is invisible until someone opens VERA on a phone with
-one bar.
+**Measure the thing users actually receive.** `performance.getEntriesByType('resource')`
+reports `transferSize` for the environment you are in — and a dev server is
+not production. Compression, CDN behaviour and proxy headers all differ.
+Check `content-encoding` on the real origin before concluding anything about
+payload weight.
