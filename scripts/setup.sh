@@ -90,20 +90,23 @@ JSON
 fi
 echo
 
-# ── 3. Cloud publish secrets ───────────────────────────────────────
+# ── 3. Cloud publish ───────────────────────────────────────────────
+# This step used to demand a Netlify token, and the whole "the Mac can stay
+# off" promise was stuck behind it. It is no longer needed: the nightly
+# sweep publishes to the `feed` branch of the public repo, which
+# raw.githubusercontent serves to browsers with CORS. Nothing to enter.
 echo "${B}[3/4] Cloud publish${R} ${D}(lets the Mac stay off)${R}"
-if command -v gh >/dev/null 2>&1 && gh secret list -R omgitsthedm/vera-apartment-search 2>/dev/null | grep -q NETLIFY_AUTH_TOKEN; then
-  echo "  ${G}already set${R} — skipping"
-elif command -v gh >/dev/null 2>&1; then
-  echo "  Token: sign in as the Little Fight NYC Netlify Owner (hello@littlefightnyc.com) → User settings → Applications → New access token → description 'VERA cloud publish'"
-  read -r -p "  Set the Netlify secrets now? [y/N] " YN
-  if [[ "$YN" =~ ^[Yy] ]]; then
-    gh secret set NETLIFY_AUTH_TOKEN -R omgitsthedm/vera-apartment-search
-    echo "fcd6f741-d479-44f4-8ee1-51da2b321227" | gh secret set NETLIFY_SITE_ID -R omgitsthedm/vera-apartment-search
-    echo "  ${G}secrets stored${R} — tell Claude \"secrets in\" to wire the publish job"
-  fi
+FEED_URL="https://raw.githubusercontent.com/omgitsthedm/vera-apartment-search/feed/meta.json"
+if curl -sfL --max-time 15 "$FEED_URL" -o /tmp/vera_feed_meta.json 2>/dev/null; then
+  echo "  ${G}publishing already — no token required${R}"
+  python3 - <<'PY' 2>/dev/null || true
+import json
+m = json.load(open("/tmp/vera_feed_meta.json"))
+print(f"  last cloud publish: {m.get('generated_at')} — {m.get('pool')} listings, {m.get('shortlist')} shortlisted")
+PY
 else
-  echo "  ${Y}gh not found — skipping${R}"
+  echo "  ${Y}no cloud feed published yet${R} — it lands on the next nightly sweep (05:30 UTC)"
+  echo "  ${D}or run it now: gh workflow run sanctioned-cloud-sweep.yml${R}"
 fi
 echo
 
