@@ -86,6 +86,55 @@ jobs:
         run: python3 scripts/refresh_market_context.py || echo "[WARN] market context unavailable — feed publishes without it"
       - name: Transit universe (MTA GTFS static)
         run: python3 scripts/refresh_transit_gtfs.py || echo "[WARN] transit universe unavailable — feed publishes without commute times"
+      # THE ENGINE'S MEMORY. Without this the cloud is amnesiac: state/ is
+      # gitignored, so every run started from nothing and silently lost
+      #   - photo_hashes / photo_provenance / photo_clone_flags: the same
+      #     photo reused across listings is one of the strongest scam
+      #     signals there is, and it can only be seen across runs
+      #   - price_history: days-on-market and price paths
+      #   - change_history + daily_changes: what is actually new today
+      #   - source_trends: the baseline that catches a source going quietly
+      #     to zero
+      #   - landlord_portfolios / address_history
+      #
+      # Deliberately the Actions cache and not a branch: this is listing and
+      # landlord data that has never been through the public lens, and the
+      # engine repo is public. The cache is readable only by workflow runs.
+      # Restored by prefix and saved under a fresh key each run, because
+      # cache entries are immutable. Daily cron keeps it well inside the
+      # 7-day eviction window.
+      - name: Restore the engine's memory
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            state/price_history.json
+            state/change_history.json
+            state/address_history.json
+            state/source_trends.json
+            state/source_anomalies.json
+            state/run_trends.json
+            state/photo_hashes.json
+            state/photo_provenance.json
+            state/photo_clone_flags.json
+            state/landlord_portfolios.json
+            state/daily_changes
+          key: vera-state-${{ github.run_id }}
+          restore-keys: vera-state-
+      - name: What it remembered
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          for name in ("source_trends", "price_history", "photo_hashes", "change_history"):
+              p = pathlib.Path("state") / f"{name}.json"
+              if not p.exists():
+                  print(f"  {name}: absent — first run, or the cache expired")
+                  continue
+              try:
+                  d = json.loads(p.read_text())
+                  print(f"  {name}: {len(d)} entries ({p.stat().st_size:,} bytes)")
+              except Exception as e:
+                  print(f"  {name}: unreadable ({e})")
+          PY
       - name: HF model cache
         uses: actions/cache@v4
         with:
@@ -124,6 +173,27 @@ jobs:
           path: snapshots/latest_snapshot.json
           retention-days: 7
           if-no-files-found: ignore
+
+      # Saved even when the pipeline failed: a partial run still advanced
+      # the photo and price memory, and throwing that away would mean the
+      # next run relearns from nothing.
+      - name: Save the engine's memory
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            state/price_history.json
+            state/change_history.json
+            state/address_history.json
+            state/source_trends.json
+            state/source_anomalies.json
+            state/run_trends.json
+            state/photo_hashes.json
+            state/photo_provenance.json
+            state/photo_clone_flags.json
+            state/landlord_portfolios.json
+            state/daily_changes
+          key: vera-state-${{ github.run_id }}
 
       # ── Publish. No secrets in this chain. ──────────────────────────
       - name: Carry the drop archive forward

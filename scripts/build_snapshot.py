@@ -534,6 +534,14 @@ def build_snapshot() -> tuple[dict[str, Any], bool]:
                 status = "failing"      # produced nothing where it reliably produced records
             elif baseline >= 20 and records_found < baseline * 0.4:
                 status = "degraded"     # still returning, but a long way down
+            elif records_found == 0 and not prior:
+                # No history to compare against, so neither guard above can
+                # fire. That is the normal case in the cloud, where every run
+                # starts from a fresh checkout — which is how streeteasy came
+                # to read green in the published feed while contributing zero
+                # listings. A source that ran and returned nothing is not
+                # healthy just because nobody can remember it doing better.
+                status = "degraded"
             else:
                 status = "healthy"
         elif records_found > 0:

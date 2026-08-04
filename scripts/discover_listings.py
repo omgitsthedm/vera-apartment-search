@@ -57,7 +57,45 @@ def source_extraction_meta(source_name: str, ok_queries: int = 0, total_queries:
     return {
         "strategy_used": meta["strategy_used"],
         "extraction_confidence": confidence,
+        # Carried so finalize_source_statuses() can tell a source that failed
+        # from one that genuinely found nothing. Every discovery function
+        # hardcodes "status": "ok" in its manifest entry, so without these
+        # two numbers the manifest cannot distinguish the two cases at all.
+        "queries_ok": ok_queries,
+        "queries_total": total_queries,
     }
+
+
+def finalize_source_statuses(manifest: dict[str, Any], log_lines: list[str]) -> None:
+    """Replace asserted success with what actually happened.
+
+    All nineteen discovery functions write `"status": "ok"` unconditionally,
+    so a source could fail every single query and still report green. The
+    only thing catching that was a history comparison in build_snapshot —
+    which needs a baseline of past runs, and cloud runs start from a fresh
+    checkout with no history at all. On 2026-08-04 that combination had
+    streeteasy reading `ok` in the published cloud feed while contributing
+    zero listings.
+
+    This is deliberately history-free: it reads only this run's own query
+    outcomes, so it is correct on the very first run on a new machine.
+    """
+    for entry in manifest.get("sources", []):
+        if entry.get("status") != "ok":
+            continue
+        total = entry.get("queries_total") or 0
+        ok = entry.get("queries_ok") or 0
+        if total <= 0:
+            continue
+        name = entry.get("source_name", "?")
+        if ok == 0:
+            entry["status"] = "failing"
+            entry["reason"] = f"all {total} queries failed"
+            log_lines.append(f"{name}: every query failed — reported as failing, not ok")
+        elif ok < total:
+            entry["status"] = "partial"
+            entry["reason"] = f"{total - ok} of {total} queries failed"
+            log_lines.append(f"{name}: {total - ok}/{total} queries failed — reported as partial")
 
 
 REQUEST_HEADERS = {
@@ -2824,6 +2862,10 @@ def main() -> int:
                         prev_source = {**prev_source, "snapshot_path": str(snapshot_path)}
                         manifest["sources"].append(prev_source)
                         log_lines.append(f"{prev_name}: carried forward from previous manifest")
+
+        # Correct asserted success before anything reads it — trends, anomaly
+        # detection and the published feed all take status at face value.
+        finalize_source_statuses(manifest, log_lines)
 
         # Enrich all manifest source entries with extraction strategy + anomaly metadata
         for src_entry in manifest.get("sources", []):
