@@ -5,6 +5,8 @@ import json
 import re
 import ssl
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -101,17 +103,36 @@ def cache_is_fresh(entry: dict[str, Any]) -> bool:
     return refreshed_at >= datetime.now(timezone.utc) - timedelta(hours=CACHE_TTL_HOURS)
 
 
-def read_json_url(url: str, timeout: int = 30) -> Any:
+def read_json_url(url: str, timeout: int = 30, attempts: int = 4) -> Any:
+    """Fetch JSON, retrying transient upstream failures.
+
+    The city's endpoints return 5xx in bursts. Without a retry a single
+    blip wipes out the whole sweep's verification layer: every lookup
+    fails, no listing gets a BBL, risk scores fall back to synthetic
+    defaults, and the scorer — correctly — refuses to recommend anything.
+    That is exactly how 2026-08-03's 15:02 run produced an empty drop
+    while 11:00 matched 17 buildings. Retry 5xx/timeouts with backoff;
+    4xx still raises immediately (a bad address should not be retried).
+    """
     request = urllib.request.Request(url, headers=REQUEST_HEADERS)
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return json.load(response)
-    except Exception as exc:  # noqa: BLE001
-        if "CERTIFICATE_VERIFY_FAILED" not in str(exc):
-            raise
-        insecure_context = ssl._create_unverified_context()
-        with urllib.request.urlopen(request, timeout=timeout, context=insecure_context) as response:
-            return json.load(response)
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            last_exc = exc
+            if exc.code < 500:
+                raise
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if "CERTIFICATE_VERIFY_FAILED" in str(exc):
+                insecure_context = ssl._create_unverified_context()
+                with urllib.request.urlopen(request, timeout=timeout, context=insecure_context) as response:
+                    return json.load(response)
+        if attempt < attempts - 1:
+            time.sleep(1.5 * (2 ** attempt))  # 1.5s, 3s, 6s
+    raise last_exc if last_exc else RuntimeError(f"unreachable: {url}")
 
 
 def socrata_request(url: str, params: dict[str, str]) -> list[dict[str, Any]]:

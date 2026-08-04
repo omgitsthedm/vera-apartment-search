@@ -689,9 +689,29 @@ def build_snapshot() -> tuple[dict[str, Any], bool]:
     # the app quote the timetable instead of inventing commute minutes.
     transit_tables = read_json(ROOT / "state" / "transit_routes.json", default=None)
 
+    # Records health: the verification layer is the product. When the city's
+    # endpoints fail, every lookup errors, no listing earns a BBL, risk scores
+    # fall back to synthetic defaults and the scorer correctly recommends
+    # nothing — which reads on the page as an ordinary quiet day. It is not.
+    # Publish the difference so the app can say which one happened.
+    _ref_rows = read_json(REFERENCE_ROOT / "current_public_records_live.json", default=[]) or []
+    _rh = {"matched": 0, "errors": 0, "skipped": 0, "total": len(_ref_rows)}
+    for _r in _ref_rows:
+        _st = str(_r.get("lookup_status") or "")
+        if _st == "matched":
+            _rh["matched"] += 1
+        elif _st in ("error", "failed"):
+            _rh["errors"] += 1
+        elif _st == "skipped":
+            _rh["skipped"] += 1
+    _attempted = _rh["matched"] + _rh["errors"]
+    _rh["degraded"] = bool(_attempted and _rh["matched"] == 0)
+    records_health = _rh
+
     payload = {
         "generated_at": utc_now_iso(),
         "transit_tables": transit_tables,
+        "records_health": records_health,
         "app": {
             "name": "NYC Apartment Search",
             "subtitle": "VERA Ops Terminal",
