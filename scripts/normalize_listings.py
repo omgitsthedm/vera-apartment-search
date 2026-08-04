@@ -85,12 +85,20 @@ BROKER_FEE_CUES = {
 }
 
 
-from config.nta_lookup import neighborhood_matches, resolve_neighborhood
+from config.nta_lookup import in_target_area, neighborhood_matches, resolve_neighborhood
 
 
 def cheap_filter_status(listing: dict[str, Any], preferences: dict[str, Any]) -> tuple[bool, list[str]]:
     failures: list[str] = []
-    allowed_neighborhoods = {canonical_text(item) for item in preferences.get("neighborhoods", [])}
+    # NOT canonical_text(). That is the STREET-ADDRESS normaliser: it
+    # abbreviates compass words, so "East Village" became "e village",
+    # "Upper East Side" became "upper e side", and neighborhood_matches()
+    # — which lowercases targets itself and never saw those forms — failed
+    # every one of them. Five of David's forty-two target neighbourhoods
+    # were silently unmatchable, including the two he named first, and
+    # every listing in them was rejected as "outside target neighborhoods"
+    # before any city-record lookup could run.
+    allowed_neighborhoods = list(preferences.get("neighborhoods", []))
     neighborhood = canonical_text(listing.get("neighborhood"))
     rent = listing.get("rent")
     max_rent = preferences.get("max_rent")
@@ -105,9 +113,7 @@ def cheap_filter_status(listing: dict[str, Any], preferences: dict[str, Any]) ->
     # the hard filter applies the actual criteria with actual data.
     prefiltered_source = str(listing.get("source_name") or "") == "email_alerts"
 
-    if allowed_neighborhoods and not neighborhood_matches(
-        listing.get("neighborhood"), allowed_neighborhoods
-    ):
+    if allowed_neighborhoods and not in_target_area(listing, allowed_neighborhoods):
         if not (prefiltered_source and not listing.get("neighborhood")):
             failures.append("outside target neighborhoods")
     if rent is None or (max_rent is not None and rent > max_rent):

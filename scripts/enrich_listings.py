@@ -300,16 +300,21 @@ def load_deduped_rows() -> list[dict[str, Any]]:
     return read_json(path, default=[])
 
 
-from config.nta_lookup import neighborhood_matches
+from config.nta_lookup import in_target_area, neighborhood_matches
 
 
 def evaluate_hard_filters(listing: dict[str, Any], preferences: dict[str, Any]) -> tuple[bool, list[str]]:
     reasons: list[str] = []
     search_mode = listing.get("search_mode", "mode_a_permanent")
 
-    neighborhoods = {canonical_text(item) for item in preferences.get("neighborhoods", [])}
+    # Raw, not canonical_text() — see the note in normalize_listings.
+    # canonical_text is the street-address normaliser and turns "Upper East
+    # Side" into "upper e side", which nothing then matches. The same bug
+    # sat in both gates, so a listing that somehow cleared the cheap filter
+    # was rejected again here.
+    neighborhoods = list(preferences.get("neighborhoods", []))
     listing_neighborhood = canonical_text(listing.get("neighborhood"))
-    if not neighborhood_matches(listing.get("neighborhood"), neighborhoods):
+    if not in_target_area(listing, neighborhoods):
         # Bridge mode is more lenient on neighborhood — still note it but don't hard-reject
         if search_mode != SEARCH_MODE_BRIDGE:
             reasons.append("outside target neighborhood")

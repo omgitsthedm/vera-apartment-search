@@ -91,6 +91,77 @@ def neighborhood_at(lat: Any, lon: Any) -> str | None:
     return None
 
 
+def borough_at(lat: Any, lon: Any) -> str | None:
+    """Borough code (M/B/Q/X/S) containing this point, or None."""
+    try:
+        la, lo = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return None
+    for h in _hoods():
+        for ring, (s, n, w, e) in zip(h["rings"], h["boxes"]):
+            if not (s <= la <= n and w <= lo <= e):
+                continue
+            if _in_ring(la, lo, ring):
+                return h.get("boro")
+    return None
+
+
+_TARGET_BORO_CACHE: dict[tuple, frozenset] = {}
+
+
+def target_boroughs(targets: set[str] | list[str]) -> frozenset:
+    """Which boroughs the target list actually covers.
+
+    Derived from the target names rather than hardcoded, so adding a Queens
+    neighbourhood to the preferences opens Queens automatically and nothing
+    here has to be remembered.
+    """
+    key = tuple(sorted(str(t).strip().lower() for t in targets if str(t).strip()))
+    if key in _TARGET_BORO_CACHE:
+        return _TARGET_BORO_CACHE[key]
+
+    hoods = _hoods()
+    boros = set()
+    for target in key:
+        # Which boroughs does THIS one target name reach?
+        hit = {h["boro"] for h in hoods
+               if h.get("boro") and neighborhood_matches(h.get("name"), [target])}
+        # A name that spans boroughs proves nothing about intent — "Murray
+        # Hill" is both Manhattan and Flushing — and letting it widen the
+        # allowed set is circular: the ambiguity being guarded against would
+        # authorise itself. Only unambiguous targets contribute.
+        if len(hit) == 1:
+            boros |= hit
+    result = frozenset(boros)
+    _TARGET_BORO_CACHE[key] = result
+    return result
+
+
+def in_target_area(listing: dict[str, Any], targets: set[str] | list[str]) -> bool:
+    """Target match that a same-named neighbourhood elsewhere cannot fake.
+
+    NYC reuses names across boroughs, and the compound-part match that makes
+    "Upper East Side-Lenox Hill-Roosevelt Island" work also lets Queens in:
+    two Craigslist listings at 40.7606,-73.7968 — Flushing — passed as the
+    Manhattan target "Murray Hill" because the NTA there is called
+    "Murray Hill-Broadway Flushing". One of them was titled "apt in flushing".
+
+    So when the listing carries coordinates, the borough those coordinates
+    fall in has to be one the target list actually covers. Without
+    coordinates this is exactly the old name match — no listing is rejected
+    for lacking data.
+    """
+    if not neighborhood_matches(listing.get("neighborhood"), targets):
+        return False
+    boro = borough_at(listing.get("latitude"), listing.get("longitude"))
+    if not boro:
+        return True
+    allowed = target_boroughs(targets)
+    if not allowed:          # nothing resolvable — do not invent a constraint
+        return True
+    return boro in allowed
+
+
 BOROUGH_WORDS = {
     "manhattan", "brooklyn", "queens", "bronx", "the bronx",
     "staten island", "new york", "nyc", "new york city",
@@ -103,14 +174,32 @@ def is_borough_only(value: Any) -> bool:
 
 
 def resolve_neighborhood(listing: dict[str, Any]) -> tuple[str | None, bool]:
-    """(neighborhood, was_resolved). Only fills borough-only/empty fields."""
+    """(neighborhood, was_resolved) from the city's own NTA polygons.
+
+    This used to fill in only empty or borough-only fields, which left a
+    confidently WRONG label untouched. RentHop was labelling 126 Grant Ave
+    (Cypress Hills), 1751 85 St (Bath Beach), 1940 79 St (Bensonhurst) and
+    215-07 Jamaica Ave (Queens Village) all as "East Village" — and VERA
+    published every one of them that way, on the map and in the table.
+
+    A listing carries its own coordinates. When those coordinates fall in a
+    polygon that contradicts the label, the label is wrong: the point is the
+    source's own data and the polygon is the city's official boundary.
+
+    Compared in both directions because NTA names are compound — a listing
+    labelled "Lenox Hill" sitting in "Upper East Side-Lenox Hill-Roosevelt
+    Island" agrees, and must not be rewritten.
+    """
     current = listing.get("neighborhood")
-    if current and not is_borough_only(current):
-        return current, False
     resolved = neighborhood_at(listing.get("latitude"), listing.get("longitude"))
-    if resolved:
-        return resolved, True
-    return current, False
+
+    if not current or is_borough_only(current):
+        return (resolved, True) if resolved else (current, False)
+    if not resolved:
+        return current, False
+    if neighborhood_matches(current, [resolved]) or neighborhood_matches(resolved, [current]):
+        return current, False
+    return resolved, True
 
 
 def neighborhood_matches(value: Any, targets: set[str] | list[str]) -> bool:
