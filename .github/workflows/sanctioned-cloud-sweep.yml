@@ -56,11 +56,19 @@ jobs:
 
   # The decisive experiment (probe 2026-08-03 showed nearly every source
   # serves datacenter IPs): the FULL pipeline in the cloud. Blocked sources
-  # skip honestly via VERA_CLOUD=1. Snapshot uploads as an artifact until
-  # David's Netlify secrets unlock cloud publish.
+  # skip honestly via VERA_CLOUD=1.
+  #
+  # PUBLISHING (2026-08-04): this job now publishes its own feed to the
+  # orphan `feed` branch, which raw.githubusercontent.com serves with
+  # `access-control-allow-origin: *`. That needs no Netlify token and no
+  # secret of any kind — only the automatic GITHUB_TOKEN. Before this, the
+  # cloud found real listings every day (231 on 2026-08-04) and buried all
+  # of them in a 7-day artifact nothing could read.
   cloud-discovery:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write        # only to force-push the orphan `feed` branch
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -106,3 +114,40 @@ jobs:
           path: snapshots/latest_snapshot.json
           retention-days: 7
           if-no-files-found: ignore
+
+      # ── Publish. No secrets in this chain. ──────────────────────────
+      - name: Carry the drop archive forward
+        if: always()
+        run: |
+          mkdir -p public_feed
+          # maintain_archive() keeps 60 rolling days, but a fresh runner has
+          # no history — without this seed every publish would reset the
+          # receipts to a single day and the archive page would go blank.
+          curl -sfL --max-time 30 -o public_feed/archive.json \
+            "https://raw.githubusercontent.com/${{ github.repository }}/feed/archive.json" \
+            || echo "[]" > public_feed/archive.json
+          python3 -c "import json,sys; d=json.load(open('public_feed/archive.json')); print(f'seeded {len(d)} archived day(s)')" \
+            || echo "[]" > public_feed/archive.json
+
+      - name: Build the public feed (same lens the Netlify feed uses)
+        if: always()
+        run: python3 scripts/publish_cloud_feed.py --out public_feed
+
+      - name: Push it to the `feed` branch
+        if: always()
+        run: |
+          test -s public_feed/public.json || { echo "no feed built — nothing to publish"; exit 1; }
+          git config user.name  "vera-cloud"
+          git config user.email "vera-cloud@users.noreply.github.com"
+          # Orphan branch, force-pushed: one commit that gets replaced each
+          # run, so a 1.5MB daily JSON never accumulates in real history.
+          MSG="$(python3 -c "import json;m=json.load(open('public_feed/meta.json'));print(f\"feed: {m['pool']} listings, {m['shortlist']} shortlisted, {m['generated_at']}\")")"
+          git checkout --orphan feed-publish
+          git reset
+          # The branch holds exactly these three files at its root, so the
+          # served URLs stay short: /feed/public.json, /feed/archive.json.
+          cp public_feed/public.json public_feed/archive.json public_feed/meta.json .
+          git add -f public.json archive.json meta.json
+          git commit -q -m "$MSG"
+          git push -f origin feed-publish:feed
+          echo "published -> https://raw.githubusercontent.com/${{ github.repository }}/feed/public.json"

@@ -55,3 +55,6 @@ alerts/
 configs/reddit.json
 configs/mail_ingest.json
 .hf-staging/
+
+# Built by publish_cloud_feed.py; published to the orphan `feed` branch.
+public_feed/
