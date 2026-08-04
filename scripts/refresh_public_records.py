@@ -112,8 +112,24 @@ def read_json_url(url: str, timeout: int = 30, attempts: int = 4) -> Any:
     defaults, and the scorer — correctly — refuses to recommend anything.
     That is exactly how 2026-08-03's 15:02 run produced an empty drop
     while 11:00 matched 17 buildings. Retry 5xx/timeouts with backoff;
-    4xx still raises immediately (a bad address should not be retried).
+    a genuine 4xx still raises immediately (a bad address should not be
+    retried).
+
+    429 and 408 are the exceptions. "Too Many Requests" is not a bad
+    address, it is the server asking us to wait, and it was being treated
+    like a 400 and dropped on the spot. That costs the listing its BBL, so
+    its risk scores fall back to the synthetic 50/45 and the scorer will
+    never recommend it — the empty-drop failure at single-listing scale.
+    Found on 2026-08-04: 337 E 77th St, a clean Upper East Side address
+    that GeoSearch resolves to BBL 1014520016 on the exact query VERA
+    builds, came back partial_address_only with hpd_risk_score 50.0. The
+    day's sourcing work roughly doubled how many listings reach this
+    lookup, which makes being rate-limited far more likely than it was.
+
+    Retry-After is honoured when the server sends it, capped so a long
+    header cannot stall the sweep.
     """
+    RETRYABLE_4XX = {408, 429}
     request = urllib.request.Request(url, headers=REQUEST_HEADERS)
     last_exc: Exception | None = None
     for attempt in range(attempts):
@@ -122,8 +138,15 @@ def read_json_url(url: str, timeout: int = 30, attempts: int = 4) -> Any:
                 return json.load(response)
         except urllib.error.HTTPError as exc:
             last_exc = exc
-            if exc.code < 500:
+            if exc.code < 500 and exc.code not in RETRYABLE_4XX:
                 raise
+            if exc.code in RETRYABLE_4XX and attempt < attempts - 1:
+                try:
+                    wait = float(exc.headers.get("Retry-After") or 0)
+                except (TypeError, ValueError):
+                    wait = 0.0
+                if wait > 0:
+                    time.sleep(min(wait, 20.0))
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
             if "CERTIFICATE_VERIFY_FAILED" in str(exc):
