@@ -59,5 +59,6 @@
   "must_have": [],
   "nice_to_have": [],
   "hard_rejects": [],
-  "run_frequency": "daily"
+  "run_frequency": "daily",
+  "hpd_calibrated": true
 }
