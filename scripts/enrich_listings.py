@@ -840,6 +840,24 @@ def _main_impl() -> int:
                 if reference.get("borough_resolved"):
                     listing["borough"] = reference["borough_resolved"]
 
+        # Coordinates from the FORWARD geocode of the address the listing
+        # states. openigloo supplies full street addresses and no lat/lon at
+        # all — 0 of 76 on 2026-08-04 — and it now carries the entire
+        # shortlist, so the best 21 listings had no map pin, no minimap and
+        # no commute read while craigslist's 179 all did.
+        #
+        # This is the opposite direction from the reverse-geocoding rejected
+        # in docs/proposals/reverse-geocoding-craigslist-pins.md, and the
+        # distinction is the whole point: geocoding "324 E 83 St" forward is
+        # resolving an address someone wrote down. Reverse-geocoding a
+        # deliberately-offset map pin is guessing which building a dot is
+        # nearest, which measured 0 for 24.
+        if reference and not listing.get("latitude"):
+            _lat, _lon = reference.get("latitude"), reference.get("longitude")
+            if _lat and _lon and float(reference.get("geosearch_match_confidence") or 0) >= 0.8:
+                listing["latitude"], listing["longitude"] = _lat, _lon
+                listing["coordinate_source"] = "geosearch_forward"
+
         if neighborhood_verified is False and reference:
             resolved_hood = reference.get("resolved_neighborhood")
             resolved_borough = reference.get("borough_resolved")
