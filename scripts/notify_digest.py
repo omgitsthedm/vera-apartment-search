@@ -59,9 +59,25 @@ def build_message() -> tuple[str, str]:
 
 
 def main() -> int:
+    # --dry-run prints and sends nothing. Without it, merely inspecting this
+    # script's output pushes a real notification to a real phone — which is
+    # exactly what happened on 2026-08-04 when an unrecognised flag was
+    # silently ignored and the digest fired for no reason.
+    import argparse
+    parser = argparse.ArgumentParser(description="VERA digest notification")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="print the digest instead of sending it")
+    args = parser.parse_args()
+
     cfg = read_json(CONFIG)
     topic = str(cfg.get("ntfy_topic") or "").strip()
     title, body = build_message()
+
+    if args.dry_run:
+        print(f"[dry-run] TITLE: {title}")
+        print(body)
+        print(f"[dry-run] would post to ntfy topic: {topic or '(none configured)'}")
+        return 0
 
     # Local notification regardless of ntfy config
     try:
