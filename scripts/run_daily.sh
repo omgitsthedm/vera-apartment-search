@@ -13,6 +13,7 @@ mkdir -p "$ROOT/logs"
 
 {
   echo "=== VERA daily pipeline starting ==="
+  python3 "$ROOT/tests/test_scoring.py" >/dev/null 2>&1 && echo "scoring tests: PASS" || echo "[WARN] scoring tests FAILED — see python3 tests/test_scoring.py"
   echo "TIMESTAMP: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "RUN_ID:    $RUN_ID"
   echo "ROOT:      $ROOT"
