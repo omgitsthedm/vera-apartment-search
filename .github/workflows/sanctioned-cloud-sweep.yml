@@ -108,6 +108,16 @@ jobs:
       # Restored by prefix and saved under a fresh key each run, because
       # cache entries are immutable. Daily cron keeps it well inside the
       # 7-day eviction window.
+      #
+      # CHANGING THIS PATH LIST WIPES THE MEMORY ONCE. GitHub derives an
+      # internal cache version from the set of paths, so a cache saved under
+      # the old list cannot be matched by a restore using the new one — not
+      # even by restore-keys. Observed 2026-08-04: runs chained fine
+      # (…814 restored from …763, …763 from …577) until three paths were
+      # added, and the next run reported "Cache not found for input keys"
+      # against a cache that plainly existed on the same ref. The run after
+      # that restored normally. Expect one blank night per path change and
+      # do not go hunting for a bug.
       - name: Restore the engine's memory
         uses: actions/cache/restore@v4
         with:
