@@ -179,6 +179,28 @@ def build_block_lot_where(block: str | None, lot: str | None, borough_text: str 
 
 
 def geosearch_lookup(listing: dict[str, Any]) -> dict[str, Any]:
+    """Forward geocode, from the address the poster wrote.
+
+    DO NOT "improve" this by falling back to GeoSearch's reverse endpoint
+    when the address is thin. The listing's own lat/lon is right there and
+    the endpoint works, so it is a tempting three-line change — it was
+    measured on 2026-08-04 and it is wrong.
+
+    Craigslist offsets its map pins by design. Against 24 records that
+    carried BOTH a full street-number address and a pin, reverse geocoding
+    returned the correct house number **0 times**; 17 landed on the right
+    street at the wrong building and 7 on a different street entirely, all
+    within 40 m. 950 Nostrand Ave resolved to 370 Graham Avenue.
+
+    A BBL obtained that way would attach a real building's violations,
+    litigation and landlord record to an apartment that is not in it — and
+    a wrong verification looks exactly like a right one, while a missing one
+    is visible and honest. Full measurement:
+    docs/proposals/reverse-geocoding-craigslist-pins.md
+
+    The coordinates are still used, for the thing they are accurate enough
+    for: resolving the neighbourhood (config/nta_lookup.py).
+    """
     address = listing.get("address_normalized") or listing.get("address_raw")
     neighborhood = listing.get("neighborhood")
     borough = listing.get("borough") or infer_borough(neighborhood, listing.get("zip"))
