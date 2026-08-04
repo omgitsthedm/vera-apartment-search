@@ -50,14 +50,15 @@ showing me relisted ghosts and landlords with violation histories I only
 learned about after touring.
 
 VERA sweeps the fragmented channels where small NYC landlords actually
-post (Craigslist API, openigloo, Listings Project, Reddit — 51% of
-listings appear on exactly one platform), joins every listing to NYC
-open data by address, and publishes a curated daily drop of at most
-eight listings that clear every gate — with a public, append-only
-archive of everything it showed and what happened to it.
+post — the Craigslist API, openigloo, Listings Project, Reddit — joins
+every listing to NYC open data by address, and publishes a curated daily
+drop of listings that clear every gate, with a public append-only archive
+of everything it showed and what happened to it. Most nights that is a
+handful; some nights it is nothing, and the page says so with a funnel
+showing exactly where the net narrowed.
 
 Technical bits HN might enjoy:
-- Zero-framework front end (~5k LOC vanilla JS, 91 in-page tests,
+- Zero-framework front end (~3.7k lines of vanilla JS, 118 in-page tests,
   CSP with no inline script), deterministic SVG "building portraits"
   seeded from each listing's uid, real NTA polygons for maps.
 - The landlord "Steward Grade" is computed only from cited public
