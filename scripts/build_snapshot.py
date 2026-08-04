@@ -194,6 +194,10 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
     # tell #13, now computed instead of merely taught.
     addr_store = read_json(durable_state / "address_history.json", default={})
     photo_flags = read_json(durable_state / "photo_clone_flags.json", default={})
+    # Provenance: ONLY the fact tier reaches the feed. no_camera_exif is
+    # true of ~100% of portal photos (they re-encode) and would flag every
+    # honest listing, so it is deliberately never published.
+    photo_prov = read_json(durable_state / "photo_provenance.json", default={})
     ai_flags = read_json(durable_state / "ai_photo_flags.json", default={})
 
     # The real subway universe (MTA GTFS static, derived weekly). When
@@ -319,6 +323,9 @@ def bucketized_payload(scored_records: list[dict[str, Any]], duplicate_rows: lis
         # perceptual-hash clones (refresh_photo_hashes.py) join the hotlink check
         if photo_flags.get(_uid2):
             record["photo_clone_suspect"] = True
+        _pv = photo_prov.get(_uid2) or {}
+        if _pv.get("declares_ai"):
+            record["photo_declares_ai"] = _pv.get("generator_marker") or True
 
         # AI-photo read (detect_ai_photos.py, HF classifier) — probabilistic
         # evidence only; deliberately outside the approved weight set
