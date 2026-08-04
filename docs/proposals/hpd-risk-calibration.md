@@ -131,3 +131,51 @@ product.
    on a composite.
 
 The flag stays for experimenting. It should not be turned on as written.
+
+
+---
+
+# A working formula, tested — `VERA_HPD_CALIBRATED` (still OFF)
+
+Direction 1 and 2 from the list above, built and measured. Severity carries
+the score, ordinary violations barely move it, an exponential curve spreads
+the range, and there is **no per-unit divisor** — that was the mistake.
+
+```
+raw = serious×9.0 + heat×1.6 + litigation×7.0
+    + ordinary_violations×0.7 + complaints×0.35 + bedbug×5.0
+score = 100 × (1 − e^(−raw / 42))
+```
+
+| Building | serious / heat | shipped | calibrated | gate |
+|---|---|---|---|---|
+| clean small building | 0 / 0 | — | **1.7** | passes |
+| clean, one complaint | 0 / 1 | — | **9.9** | passes |
+| 459 Keap St (2 units) | 2 / 0 | 42.0 | **39.1** | passes |
+| 114 N Seventh | **0** / 5 | **100.0** | **41.3** | passes |
+| 48 W 138 St | 3 / 2 | 100.0 | **66.5** | blocked |
+| 5 Tudor City | 7 / 14 | 100.0 | **94.3** | blocked |
+| 580 St Nicholas | 23 / 50 | 100.0 | **100.0** | blocked |
+
+The spread is the point: 1.7 → 9.9 → 39 → 41 → 66 → 94 → 100 is a signal.
+Six identical 100s was not.
+
+Three things it gets right that the shipped formula does not: a building
+with **zero serious violations** stops scoring maximum risk; a small
+owner-direct building with a couple of violations stays reachable, which is
+VERA's whole point; and genuinely neglected buildings still block hard.
+
+**Still off by default.** Enabling changes what gets recommended and
+emailed, which is David's call. To try it:
+
+```bash
+VERA_HPD_CALIBRATED=1 python3 scripts/enrich_listings.py   # one run
+```
+or set `"hpd_calibrated": true` in `configs/user_preferences.json` to make it
+the standing behaviour.
+
+Worth deciding alongside it: `max_hpd_risk: 65` was tuned against a
+saturating score. Against this one, 65 lands between 48 W 138 (66.5, just
+blocked) and 459 Keap (39.1, comfortably through) — probably about right,
+but it is now a real threshold on a real distribution rather than a filter
+against a wall of 100s.

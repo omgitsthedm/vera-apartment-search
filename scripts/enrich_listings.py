@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -385,7 +386,7 @@ def load_watchlist_set(rows: list[dict[str, Any]], key: str) -> dict[str, dict[s
     return items
 
 
-# Per-unit HPD risk, built and tested but OFF by default.
+# Recalibrated HPD risk, built and tested but OFF by default.
 #
 # The shipped formula saturates: on 2026-08-04 six of seven buildings with
 # real records scored exactly 100.0, including one with ZERO serious open
@@ -396,15 +397,15 @@ def load_watchlist_set(rows: list[dict[str, Any]], key: str) -> dict[str, dict[s
 #
 # Turning this on changes which listings are recommended and emailed, which
 # AGENTS.md reserves to David. It therefore stays behind an explicit switch:
-#   VERA_HPD_PER_UNIT=1   (or "hpd_per_unit": true in configs/user_preferences.json)
+#   VERA_HPD_CALIBRATED=1  (or "hpd_calibrated": true in configs/user_preferences.json)
 # Evidence and reasoning: docs/proposals/hpd-risk-calibration.md
-def _hpd_per_unit_enabled() -> bool:
+def _hpd_calibrated_enabled() -> bool:
     import os
-    if os.environ.get("VERA_HPD_PER_UNIT") == "1":
+    if os.environ.get("VERA_HPD_CALIBRATED") == "1":
         return True
     try:
         prefs = read_json(CONFIG_ROOT / "user_preferences.json", default={}) or {}
-        return bool(prefs.get("hpd_per_unit"))
+        return bool(prefs.get("hpd_calibrated"))
     except Exception:  # noqa: BLE001
         return False
 
@@ -419,23 +420,27 @@ def hpd_risk_score(reference: dict[str, Any] | None) -> float:
     bedbug = float(reference.get("bedbug_reports_3y") or 0)
     serious_open = float(reference.get("serious_open_violations") or 0)
 
-    units = float(reference.get("unit_count") or 0)
-    if _hpd_per_unit_enabled() and units > 0:
-        # Rates, not raw counts: 7 serious violations across 799 apartments is
-        # a better building than 3 across 89. Bedbugs stay absolute — they are
-        # rare enough that one filing matters regardless of size.
-        return round(
-            min(
-                100.0,
-                (serious_open / units) * 250.0
-                + (heat / units) * 60.0
-                + (litigation / units) * 120.0
-                + (violations / units) * 25.0
-                + (complaints / units) * 8.0
-                + bedbug * 6.0,
-            ),
-            1,
+    if _hpd_calibrated_enabled():
+        # Severity-weighted with a soft curve, and deliberately NO per-unit
+        # divisor. An earlier attempt divided by units and inverted the whole
+        # thesis: it blocked 459 Keap St (2 units, the only listing clearing
+        # every gate) while passing a 799-unit complex with seven serious
+        # violations at 4.5. Small buildings are what VERA hunts; dividing by
+        # size punishes exactly them.
+        #
+        # Instead: serious violations, heat failure and litigation carry the
+        # score; ordinary violations barely move it (in NYC one can be peeling
+        # paint); and an exponential curve spreads the low-to-mid range rather
+        # than pinning everything at the cap.
+        raw = (
+            serious_open * 9.0
+            + heat * 1.6
+            + litigation * 7.0
+            + violations * 0.7
+            + complaints * 0.35
+            + bedbug * 5.0
         )
+        return round(min(100.0, 100.0 * (1.0 - math.exp(-raw / 42.0))), 1)
 
     return round(
         min(
