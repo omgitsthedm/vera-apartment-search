@@ -249,11 +249,16 @@ def compute_listing_confidence(
 # attach in build_snapshot, since they land later in the compose than the
 # base confidence pass. Combined cap −45: a listing tripping everything
 # keeps the other components' say.
+#
+# Two tiers, David's ruling 2026-08-05 (approved 2026-08-06): true fraud
+# evidence deducts hard, every time — photo clones and contact reuse.
+# Signals a small landlord could produce by sheer laziness — description
+# templates, relist counter-resets — NEVER move the score; the app shows
+# them as a quiet "could be laziness, could be worse" sticker instead.
 FORENSIC_WEIGHTS = {
-    "relist_suspect": (10, "relisted after disappearing — days-on-market counter reset"),
-    "contact_reuse": (15, "contact appears across multiple listings in the net"),
-    "desc_clone": (25, "description is a near-verbatim template of another address"),
-    "photo_clone": (20, "lead photo also appears at a different address"),
+    "contact_reuse": (25, "contact appears across multiple listings in the net"),
+    "photo_clone": (30, "lead photo also appears at a different address"),
+    # sticker-only, no deduction: relist_suspect, desc_clone
 }
 FORENSIC_CAP = 45
 
@@ -278,15 +283,11 @@ def apply_forensic_deductions(listing: dict[str, Any]) -> None:
     if score is None:
         return
     hits: list[dict[str, Any]] = []
-    if listing.get("relist_suspect"):
-        pts, why = FORENSIC_WEIGHTS["relist_suspect"]
-        hits.append({"points": pts, "reason": why})
+    # Hard tier only. relist_suspect and desc_clone_of are deliberately
+    # absent — sticker-only signals per the two-tier ruling above.
     if (listing.get("contact_reuse_count") or 0) > 3:
         pts, why = FORENSIC_WEIGHTS["contact_reuse"]
         hits.append({"points": pts, "reason": why + f" ({listing['contact_reuse_count']}×)"})
-    if listing.get("desc_clone_of"):
-        pts, why = FORENSIC_WEIGHTS["desc_clone"]
-        hits.append({"points": pts, "reason": why})
     if listing.get("photo_clone_suspect"):
         pts, why = FORENSIC_WEIGHTS["photo_clone"]
         hits.append({"points": pts, "reason": why})
