@@ -1,8 +1,11 @@
 {
-  "enabled": true,
+  "enabled": false,
   "recipient": "hello@littlefightnyc.com",
   "from_address": "hello@littlefightnyc.com",
-  "recommendations": ["pursue", "pursue cautiously"],
+  "recommendations": [
+    "pursue",
+    "pursue cautiously"
+  ],
   "min_overall_score": 60,
   "min_listing_confidence": 60,
   "max_hpd_risk": 65,
