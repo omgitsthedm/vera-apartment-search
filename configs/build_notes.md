@@ -9,7 +9,7 @@
 
 ## Working Root
 
-- `/Users/davidmarsh/Desktop/Personal/OpenClaw_Local/vera-apartment-search`
+- `/Users/davidmarsh/Code/Personal/vera-apartment-search`
 
 ## Current Build Status
 
@@ -26,11 +26,11 @@ The first goal is a transparent, inspectable local pipeline that can be tested r
 
 The sample fixtures are visible under:
 
-- `/Users/davidmarsh/Desktop/Personal/OpenClaw_Local/vera-apartment-search/cache/discovery_seeds/`
+- `/Users/davidmarsh/Code/Personal/vera-apartment-search/cache/discovery_seeds/`
 
 The sample public-record reference layer is visible under:
 
-- `/Users/davidmarsh/Desktop/Personal/OpenClaw_Local/vera-apartment-search/cache/reference_data/`
+- `/Users/davidmarsh/Code/Personal/vera-apartment-search/cache/reference_data/`
 
 ## Intended Next Steps
 

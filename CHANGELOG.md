@@ -9,6 +9,43 @@ Component prefixes: **engine** · **dashboard** · **site** (littlefightnyc.com)
 
 ---
 
+## 1.4.0 — 2026-08-08 · "One Public Home"
+
+VERA is now one Little Fight NYC demo product in public, with a separate
+engine only where privacy and scheduled processing require it.
+
+### engine
+- The orphan `feed` branch remains the sanitized upstream source and carries
+  exactly `public.json`, `archive.json`, and `meta.json` through the canonical
+  `public_lens` privacy boundary.
+- Local autonomous runners no longer sync or deploy a dashboard. They record
+  publication as external and preserve their discovery, notification, and
+  enrichment work.
+- The historical local publisher and its standalone health entry point are
+  hard-disabled. A static regression test rejects their reintroduction into
+  active runner, config, or workflow code.
+
+### site
+- `https://littlefightnyc.com/vera/` is the sole public product and canonical
+  URL.
+- Browser code reads one first-party contract:
+  `/vera/data/public.json`, `/vera/data/archive.json`, and
+  `/vera/data/meta.json`. Little Fight's exact rewrites connect that contract
+  to the sanitized upstream feed.
+
+### ops
+- The former dashboard checkout and dedicated VERA hosting project are
+  historical, nondeployable records rather than live product surfaces.
+- The stale Desktop/OpenClaw schedule installer is hard-disabled, its tracked
+  templates are removed, and status/removal helpers now enumerate the actual
+  daily, nightly, watchdog, and weekly agent set. No loaded agent was changed.
+- The private/raw engine stays in its canonical Code checkout so no owner-only
+  data enters the Little Fight repository or hosting property.
+- VERA requires no dedicated hosting project, hosting credential, or personal
+  access token.
+
+---
+
 ## 1.3.0 — 2026-08-04 · "The Cloud Publishes, and Says What It Cannot See"
 
 The fourth release. VERA had been finding real listings in the cloud every

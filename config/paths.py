@@ -39,17 +39,5 @@ WATCHLIST_DIR = VERA_ROOT / "watchlists"
 # Logging
 LOG_DIR = VERA_ROOT / "logs"
 
-# Dashboard (external project)
-DASHBOARD_ROOT = Path(
-    os.environ.get(
-        "VERA_DASHBOARD_ROOT",
-        "/Users/davidmarsh/Code/Personal/nyc-apartment-search-dashboard",
-    )
-)
-DASHBOARD_SITE_DIR = DASHBOARD_ROOT / "site"
-DASHBOARD_DATA_DIR = DASHBOARD_SITE_DIR / "data"
-
 # Key state files
-PUBLISH_STATE_FILE = VERA_ROOT / ".publish_state.json"
-LAST_DEPLOYED_HASH_FILE = VERA_ROOT / ".last_deployed_hash"
 LATEST_RUN_FILE = STATE_DIR / "latest_run.json"

@@ -1,12 +1,9 @@
-# Option A — ACTIVE (approved by David 2026-08-03, "I approve of all of it").
+# ACTIVE (approved by David 2026-08-03, "I approve of all of it").
 #
-# PUBLISHING NEEDS NO SECRET. This used to say "cloud publish joins once
-# David adds the Netlify secrets" and told the reader to create
-# NETLIFY_AUTH_TOKEN and NETLIFY_SITE_ID. That is superseded: the publish
-# step below uses only the automatic GITHUB_TOKEN. Do NOT create a Netlify
-# personal access token for VERA — the Little Fight NYC handoff records
-# this as a settled determination, and a PAT created during setup was
-# deleted once the code audit proved it unnecessary.
+# This workflow publishes only the sanitized upstream data branch. The public
+# product, browser assets, and first-party `/vera/data/*` contract all live at
+# https://littlefightnyc.com/vera/. Publishing needs no hosting credential or
+# personal access token; it uses only the automatic GITHUB_TOKEN.
 #
 # Scope: official CSVs and GTFS probe clean from datacenter IPs, and the
 # 2026-08-03 probe showed nearly every source does. Genuinely blocked
@@ -58,12 +55,10 @@ jobs:
   # serves datacenter IPs): the FULL pipeline in the cloud. Blocked sources
   # skip honestly via VERA_CLOUD=1.
   #
-  # PUBLISHING (2026-08-04): this job now publishes its own feed to the
-  # orphan `feed` branch, which raw.githubusercontent.com serves with
-  # `access-control-allow-origin: *`. That needs no Netlify token and no
-  # secret of any kind — only the automatic GITHUB_TOKEN. Before this, the
-  # cloud found real listings every day (231 on 2026-08-04) and buried all
-  # of them in a 7-day artifact nothing could read.
+  # PUBLISHING: this job writes exactly public.json, archive.json, and
+  # meta.json to the orphan `feed` branch. Little Fight NYC maps its exact
+  # first-party routes to those files; browsers do not use the branch URL.
+  # The workflow needs only the automatic GITHUB_TOKEN.
   cloud-discovery:
     runs-on: ubuntu-latest
     # 45 was sized for discovery alone. This job now also runs 33 extra
@@ -181,7 +176,7 @@ jobs:
       # The layer that makes VERA more than an aggregator, and which had
       # never once run in the cloud: run_daily.sh stops at build_snapshot,
       # and these live in the Mac's run_nightly_autonomous.sh. So the cloud
-      # feed — now the primary path — carried no cloned-photo detection, no
+      # sanitized upstream feed carried no cloned-photo detection, no
       # days-on-market, and no answer to the question the whole thesis rests
       # on: what does this owner do to their OTHER tenants?
       #
@@ -281,7 +276,7 @@ jobs:
           python3 -c "import json,sys; d=json.load(open('public_feed/archive.json')); print(f'seeded {len(d)} archived day(s)')" \
             || echo "[]" > public_feed/archive.json
 
-      - name: Build the public feed (same lens the Netlify feed uses)
+      - name: Build the public feed through the canonical privacy lens
         if: always()
         run: python3 scripts/publish_cloud_feed.py --out public_feed
 
@@ -296,8 +291,8 @@ jobs:
           MSG="$(python3 -c "import json;m=json.load(open('public_feed/meta.json'));print(f\"feed: {m['pool']} listings, {m['shortlist']} shortlisted, {m['generated_at']}\")")"
           git checkout --orphan feed-publish
           git reset
-          # The branch holds exactly these three files at its root, so the
-          # served URLs stay short: /feed/public.json, /feed/archive.json.
+          # The branch holds exactly these three files at its root. Little
+          # Fight's exact `/vera/data/*` rewrites are their public contract.
           cp public_feed/public.json public_feed/archive.json public_feed/meta.json .
           git add -f public.json archive.json meta.json
           git commit -q -m "$MSG"

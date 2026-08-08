@@ -9,7 +9,7 @@ listing against the city's own records, and publishes a curated daily
 drop of at most eight listings that clear every gate — with an honest
 public ledger of everything it passed on and why.
 
-**Live:** https://littlefightnyc.com/vera · the field manual and daily
+**Live:** https://littlefightnyc.com/vera/ · the field manual and daily
 receipts are free at `/vera/manual/` and `/vera/archive/`.
 
 ## What it computes (all cited or ≈-marked)
@@ -36,7 +36,9 @@ owner correction channel.
 ## Run it
 Python 3.12+, stdlib + Pillow. `scripts/run_daily.sh` runs the pipeline;
 GitHub Actions runs the cloud sweep daily (`.github/workflows/`). Feed
-contract: `configs/snapshot_schema.md`. Agent rules: `AGENTS.md`.
+contract: `configs/snapshot_schema.md`. The public browser reads only Little
+Fight's `/vera/data/{public,archive,meta}.json` routes. Agent rules:
+`AGENTS.md`.
 
 Built by [Little Fight NYC](https://littlefightnyc.com). AGPL-3.0 intent
 for code; data derivations carry their sources' terms (MTA GTFS, NYC

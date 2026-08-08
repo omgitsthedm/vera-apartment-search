@@ -1,32 +1,29 @@
 #!/usr/bin/env python3
-"""Build the public feed from a snapshot, with no Netlify token involved.
+"""Build the sanitized upstream feed for Little Fight NYC's VERA product.
 
 WHY
 ---
-The cloud sweep has been running the full pipeline daily and finding real
-listings — 231 on 2026-08-04, including 179 from Craigslist, which the Mac
-cannot reach as reliably. Every one of them died in a GitHub artifact that
-expires in seven days and that no human or browser can read. The live feed
-only refreshed when David's Mac happened to run.
+The scheduled cloud sweep can reach sources that the Mac cannot reach as
+reliably. This script turns its snapshot into the three public files that the
+workflow force-pushes to an orphan `feed` branch of this public repository.
+The Little Fight NYC site maps its exact `/vera/data/{public,archive,meta}.json`
+routes to those sanitized files. Browser code reads only the first-party
+Little Fight contract; the branch URL is an upstream implementation detail.
 
-Publishing to Netlify needs a token David has not created. Rather than wait
-on that, this writes the same sanitized feed to a plain directory, which the
-workflow force-pushes to an orphan `feed` branch of this PUBLIC repo.
-raw.githubusercontent.com then serves it with `access-control-allow-origin: *`
-and a 5-minute cache — so the browser can read it directly, with no secret
-anywhere in the chain, and the Mac can be off.
+The workflow needs no hosting credential or personal access token. It uses
+only the automatic `GITHUB_TOKEN`, and the Mac can be off.
 
 An orphan branch (not main) keeps a 1.5MB daily JSON out of the repo's real
 history: each publish replaces the single commit rather than stacking on it.
 
 SAFETY
 ------
-The payload goes through the same lens as the Netlify feed — literally the
-same module — and then through audit_public_payload(), which walks the
-finished structure looking for personal fields and un-neutralized watchlist
-wording. A non-empty audit is a hard failure: nothing is written, and the
-workflow step fails loudly. A feed that does not publish is a bad day; a
-feed that publishes someone's phone number is not recoverable.
+The payload goes through the canonical `public_lens` module and then through
+`audit_public_payload()`, which walks the finished structure looking for
+personal fields and un-neutralized watchlist wording. A non-empty audit is a
+hard failure: nothing is written, and the workflow step fails loudly. A feed
+that does not publish is a bad day; a feed that publishes someone's phone
+number is not recoverable.
 
 Usage: python3 scripts/publish_cloud_feed.py [--out public_feed]
 """
@@ -68,7 +65,7 @@ def read_json(path: Path, default: Any = None) -> Any:
 def load_snapshot() -> tuple[dict[str, Any], str]:
     """Prefer a successful latest run; fall back to last-known-good.
 
-    Mirrors the dashboard's rule. A degraded run must not blank the feed —
+    A degraded run must not blank the public product —
     stale-but-true beats empty, and the app shows the run's own timestamp so
     a visitor can see for themselves how fresh it is.
     """

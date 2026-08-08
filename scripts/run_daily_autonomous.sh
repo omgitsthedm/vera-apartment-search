@@ -53,7 +53,7 @@ state = {
     'started_at': datetime.now(timezone.utc).isoformat(),
     'status': 'running',
     'pipeline_status': 'pending',
-    'publish_status': 'pending'
+    'publish_status': 'external'
 }
 with open('$STATE_DIR/latest_run.json', 'w') as f:
     json.dump(state, f, indent=2)
@@ -69,29 +69,14 @@ with open('$STATE_DIR/latest_run.json', 'w') as f:
   fi
   PIPELINE_END="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-  PUBLISH_OK=true
-  PUBLISH_START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  PUBLISH_BLOCKED_REASON=""
-  if [ "$PIPELINE_OK" = "true" ]; then
-    if "$ROOT/scripts/publish_dashboard.sh"; then
-      echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] publish step: COMPLETED"
-    else
-      echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] publish step: FAILED"
-      PUBLISH_OK=false
-    fi
-  else
-    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] publish step: BLOCKED (pipeline failed)"
-    PUBLISH_OK=false
-    PUBLISH_BLOCKED_REASON="discover/pipeline stage failed in current run"
-  fi
-  PUBLISH_END="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  # Public publishing is owned by the scheduled GitHub Actions cloud sweep.
+  # Local runners never sync or deploy the retired standalone dashboard.
+  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] publish step: EXTERNAL (cloud feed)"
 
-  if [ "$PIPELINE_OK" = "true" ] && [ "$PUBLISH_OK" = "true" ]; then
+  if [ "$PIPELINE_OK" = "true" ]; then
     OUTCOME="success"
     python3 "$ROOT/scripts/send_alerts.py" || echo "[WARN] full-fit email alert failed (non-fatal)"
     python3 "$ROOT/scripts/record_price_history.py" || echo "[WARN] price history record failed (non-fatal)"
-  elif [ "$PIPELINE_OK" = "true" ] && [ "$PUBLISH_OK" = "false" ]; then
-    OUTCOME="pipeline_ok_publish_failed"
   else
     OUTCOME="pipeline_failed"
   fi
@@ -108,10 +93,10 @@ state = {
     'pipeline_status': 'success' if '$PIPELINE_OK' == 'true' else 'failed',
     'pipeline_started_at': '$PIPELINE_START',
     'pipeline_finished_at': '$PIPELINE_END',
-    'publish_status': 'success' if '$PUBLISH_OK' == 'true' else 'failed',
-    'publish_started_at': '$PUBLISH_START',
-    'publish_finished_at': '$PUBLISH_END',
-    'publish_blocked_reason': '$PUBLISH_BLOCKED_REASON' or None
+    'publish_status': 'external',
+    'publish_started_at': None,
+    'publish_finished_at': None,
+    'publish_blocked_reason': None
 }
 with open('$STATE_DIR/latest_run.json', 'w') as f:
     json.dump(state, f, indent=2)

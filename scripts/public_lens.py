@@ -3,16 +3,12 @@
 
 WHY THIS LIVES IN THE ENGINE REPO
 ---------------------------------
-This logic used to live only in the dashboard repo, which is private. That
-had two costs. The smaller one was drift risk: the privacy rules governing
-what reaches the public feed sat in a place the engine could not see. The
-larger one was that the cloud sweep could not publish at all — GitHub
-Actions runs against this repo, so it had no access to the code that turns a
-snapshot into a public feed, and its daily results expired unseen in a
-7-day artifact.
-
-Both scripts in the dashboard repo now import from here. There is exactly
-one implementation of the privacy boundary, and it is the one the cloud runs.
+The privacy boundary belongs beside the engine data it protects. GitHub
+Actions runs against this repository, so the scheduled sweep can apply this
+single implementation before publishing the sanitized `feed` branch. The
+Little Fight NYC application consumes that output through its first-party
+`/vera/data/*` contract; it does not carry a second copy of the transformation
+logic.
 
 THE BOUNDARY
 ------------
@@ -169,7 +165,7 @@ def build_hunt_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     Includes shortlist + manual-review entries, today's changes, and a
     skip-reason distribution so the empty state can say what the pipeline
-    DID find. OPS-only telemetry stays in dashboard.json.
+    DID find. OPS-only telemetry stays in the full engine snapshot.
     """
     reviewed_out = payload.get("reviewed_out") or []
     manual_review = [
@@ -358,12 +354,13 @@ def build_public_payload(hunt: dict[str, Any],
 
 
 def maintain_archive(public: dict[str, Any], data_root: Path | str) -> dict[str, Any]:
-    """Append today's drop to the public receipts (data/archive.json).
+    """Append today's drop to the sanitized public receipts (`archive.json`).
 
     The drop is computed server-side with the same full-fit gate the
     emailer uses, over the ALREADY-SANITIZED pool — the archive can never
     carry a field public.json would not. One entry per calendar day
-    (re-publishes replace it), capped at 60 days, append-only otherwise.
+    (re-publishes replace it), capped at 60 days, append-only otherwise. The
+    Little Fight site exposes this file at `/vera/data/archive.json`.
     """
     archive_path = Path(data_root) / "archive.json"
     try:

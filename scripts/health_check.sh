@@ -48,13 +48,15 @@ check_path "$ROOT/scripts/enrich_listings.py" "enrich script"
 check_path "$ROOT/scripts/score_listings.py" "score script"
 check_path "$ROOT/scripts/run_daily.sh" "daily runner"
 check_path "$ROOT/scripts/run_weekly.sh" "weekly runner"
-check_path "$ROOT/scripts/publish_dashboard.sh" "dashboard publish runner"
 check_path "$ROOT/scripts/run_daily_autonomous.sh" "autonomous daily runner"
+check_path "$ROOT/scripts/run_nightly_autonomous.sh" "autonomous nightly runner"
 check_path "$ROOT/scripts/run_weekly_autonomous.sh" "autonomous weekly runner"
-check_path "$ROOT/scripts/install_launch_agents.sh" "launch-agent install script"
+check_path "$ROOT/scripts/watchdog_stale_run.sh" "stale-run watchdog"
 check_path "$ROOT/scripts/remove_launch_agents.sh" "launch-agent remove script"
-check_path "$ROOT/configs/launchd/com.vera.apartment-search.daily.plist" "daily launch-agent template"
-check_path "$ROOT/configs/launchd/com.vera.apartment-search.weekly.plist" "weekly launch-agent template"
+check_path "$ROOT/configs/launchd-v2/com.vera.apartment-search.daily.plist" "daily launch-agent template"
+check_path "$ROOT/configs/launchd-v2/com.vera.apartment-search.nightly.plist" "nightly launch-agent template"
+check_path "$ROOT/configs/launchd-v2/com.vera.apartment-search.watchdog.plist" "watchdog launch-agent template"
+check_path "$ROOT/configs/launchd-v2/com.vera.apartment-search.weekly.plist" "weekly launch-agent template"
 check_writable_dir "$ROOT/raw" "raw dir"
 check_writable_dir "$ROOT/normalized" "normalized dir"
 check_writable_dir "$ROOT/deduped" "deduped dir"
@@ -69,15 +71,6 @@ if command -v ollama >/dev/null 2>&1; then
   passes+=("ollama available (optional)")
 else
   passes+=("ollama absent (optional — deterministic mode)")
-fi
-
-if command -v netlify >/dev/null 2>&1; then
-  passes+=("netlify available")
-elif [[ "${VERA_CLOUD:-}" == "1" ]]; then
-  # Cloud discovery doesn't publish (yet); the CLI is a publish-time need.
-  passes+=("netlify absent (optional — cloud discovery mode)")
-else
-  failures+=("netlify missing from PATH")
 fi
 
 {

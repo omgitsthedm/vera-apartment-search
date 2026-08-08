@@ -3,7 +3,9 @@ set -euo pipefail
 
 UID_VALUE="$(id -u)"
 LABELS=(
-  "com.vera.apartment-search.hourly"
+  "com.vera.apartment-search.daily"
+  "com.vera.apartment-search.nightly"
+  "com.vera.apartment-search.watchdog"
   "com.vera.apartment-search.weekly"
 )
 
