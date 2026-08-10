@@ -1,10 +1,10 @@
 # VERA schedules
 
-Verified 2026-08-08 against the loaded `com.vera.apartment-search.*` agents.
+Verified 2026-08-10 against the loaded `com.vera.apartment-search.*` agents. All four were loaded, idle at inspection time, and reported last exit code `0`.
 
 ## Local engine cadence
 
-The loaded LaunchAgents run only the private engine checkout at
+The loaded LaunchAgents run only the canonical engine checkout at
 `/Users/davidmarsh/Code/Personal/vera-apartment-search`:
 
 | Agent | Machine-local schedule | Entrypoint |
@@ -16,8 +16,9 @@ The loaded LaunchAgents run only the private engine checkout at
 
 Their only tracked templates live in `configs/launchd-v2/`. The stale
 `configs/launchd/` templates that pointed at a retired Desktop/OpenClaw
-checkout were deleted. `scripts/install_launch_agents.sh` is hard-disabled;
-schedule replacement requires a separately authorized maintenance window.
+checkout were deleted. No unattended schedule installer ships with the
+engine; schedule replacement requires a separately authorized maintenance
+window.
 
 The daily and nightly runners execute the discovery-to-snapshot pipeline. The
 nightly runner also performs local notification and enrichment follow-ons. The
@@ -30,8 +31,10 @@ publication belongs to the cloud workflow.
 
 ## Public feed cadence
 
-`.github/workflows/sanctioned-cloud-sweep.yml` runs on GitHub Actions at
-05:30 UTC daily and on explicit manual dispatch. It:
+`.github/workflows/sanctioned-cloud-sweep.yml` is scheduled on GitHub Actions at
+05:30 UTC daily and also supports explicit manual dispatch. GitHub may queue a
+scheduled job after its trigger time. Manual dispatch is a publication action
+and requires current authorization. The workflow:
 
 1. Runs the cloud-safe engine pipeline.
 2. Passes the result through `scripts/public_lens.py` and its independent

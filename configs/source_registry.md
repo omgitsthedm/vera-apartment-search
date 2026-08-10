@@ -1,74 +1,25 @@
-# Source Registry
+# Interpret VERA source status
 
-This file is the human-readable inventory of source behavior, status, and duplicate risk.
+`configs/source_catalog.json` is the tracked machine-readable source inventory. The latest sanitized feed reports observed source counts and health for one completed run. This document defines how to interpret those values without freezing a changing source list into prose.
 
-## Source: Craigslist — LIVE
-Access method: public HTML search + cached detail pages
-Status: **LIVE** — primary discovery source
-Rate limiting: 1200ms between requests
-Cache TTL: 18 hours per listing
-Known fragility: noisy results, vague addresses, inconsistent formatting
-Notes about duplicates: high duplicate risk within source; high owner-direct upside
+## Status meanings
 
-## Source: StreetEasy — LIVE
-Access method: embedded JSON data from public search result pages
-Status: **LIVE** — low volume at sub-$2,500 price point (honest market reality)
-Rate limiting: 2000ms between requests
-Cache TTL: 12 hours per listing
-Known fragility: embedded data format could change; NYC-specific platform
-Notes about duplicates: high overlap with Zillow-family inventory; photos served from zillowstatic.com
-Note: Alphabet City does not have a separate StreetEasy slug; covered under East Village search
+- **Healthy**: the source ran and produced results consistent with its current observed baseline
+- **Degraded**: the source ran, but yield or query success fell enough to require review
+- **Partial**: some source queries succeeded and some failed
+- **Failing**: the source ran and all relevant queries failed or its expected output disappeared
+- **Disabled**: configuration deliberately excludes the source
+- **Not scheduled**: the current environment deliberately skips the source, often because the network cannot reach it safely
+- **Experimental**: the adapter is measured but not relied on for coverage
 
-## Source: RentHop — LIVE
-Access method: search page crawl + detail page JSON-LD extraction
-Status: **LIVE** — good volume, full structured data on detail pages
-Rate limiting: 2000ms between requests
-Cache TTL: 12 hours per listing
-Known fragility: HTML structure changes; some results return outside target neighborhoods
-Notes about duplicates: moderate overlap with Craigslist; cross-source dedupe handles this
+Do not infer source health from a static label in this file. Inspect `source_health` and `sources` in the latest sanitized feed, then compare the result with the source's current configuration and run evidence. A source with zero records is not automatically broken, and a source labeled `ok` is not automatically healthy.
 
-## Source: Apartments.com — NOT FEASIBLE
-Status: **NOT FEASIBLE**
-Reason: returns HTTP 403 on all requests, aggressive anti-bot protection
-Last tested: 2026-03-17
+## Change rules
 
-## Source: Zillow — NOT FEASIBLE
-Status: **NOT FEASIBLE**
-Reason: Zillow Group anti-bot protection, HTTP 403 on all requests
-Last tested: 2026-03-17
+- Keep request delays and cache time-to-live values conservative
+- Do not add authenticated scraping, CAPTCHA bypass, residential-proxy escalation, or terms-avoidance behavior
+- Do not change enabled sources, target geography, price criteria, or scoring behavior without David's approval
+- Update `configs/source_catalog.json`, executable adapter tests, and this interpretation contract together when a status model changes
+- Never copy credentials, private alerts, personal preferences, or raw source payloads into this registry
 
-## Source: HotPads — NOT FEASIBLE
-Status: **NOT FEASIBLE**
-Reason: owned by Zillow Group, same anti-bot protection
-Last tested: 2026-03-17
-
-## Source: Trulia — NOT FEASIBLE
-Status: **NOT FEASIBLE**
-Reason: owned by Zillow Group, same anti-bot protection
-Last tested: 2026-03-17
-
-## Source: Facebook Marketplace — NOT FEASIBLE
-Status: **NOT FEASIBLE**
-Reason: login-gated, cannot be scraped without authentication
-Last tested: 2026-03-17
-
-## Verification Source: NYC Open Data — LIVE
-Access method: Socrata API (5 datasets)
-Status: **LIVE** — provides HPD complaints, violations, litigation, registrations, buildings
-Rate limiting: low
-Used for: building risk scoring, not listing discovery
-
-## Verification Source: NYC HPD Online
-Access method: public building search
-Status: reference only
-Used for: building-level risk context
-
-## Verification Source: ACRIS
-Access method: public property and document lookup
-Status: reference only (not yet automated)
-Used for: ownership clues
-
-## Verification Source: NYC Property / Finance Lookup
-Access method: public lookup surfaces
-Status: reference only (not yet automated)
-Used for: owner and tax-benefit clues
+Run `python3 tests/test_source_honesty.py` after an adapter, catalog, source-status, or price-ceiling change.

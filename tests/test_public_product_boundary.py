@@ -3,7 +3,7 @@
 
 Run with `python3 tests/test_public_product_boundary.py`.
 
-VERA's private engine may publish a sanitized upstream feed, but active local
+VERA's engine may publish a sanitized upstream feed, but active local
 runners and config must never regain a second website or dashboard deploy
 path. The public browser surface belongs exclusively to Little Fight NYC.
 """
@@ -15,9 +15,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-RETIRED_ENTRYPOINTS = {
+RETIRED_PATHS = {
+    ROOT / "scripts" / "run_hourly.sh",
+    ROOT / "scripts" / "run_hourly_autonomous.sh",
     ROOT / "scripts" / "publish_dashboard.sh",
     ROOT / "scripts" / "publish_health.py",
+    ROOT / "scripts" / "install_launch_agents.sh",
+    ROOT / "docs" / "STATE-2026-08-03.md",
+    ROOT / "docs" / "STATE-2026-08-04.md",
+    ROOT / "docs" / "launch" / "GO-LIVE-CHECKLIST.md",
+    ROOT / "docs" / "launch" / "POSTS.md",
+    ROOT / "docs" / "launch" / "README-public.md",
+    ROOT / "docs" / "plans" / "2026-03-17-multi-source-expansion-design.md",
+    ROOT / "docs" / "proposals" / "feed-payload-weight.md",
 }
 
 
@@ -32,7 +42,7 @@ def active_files() -> list[Path]:
         *ROOT.glob(".github/workflows/*.yml"),
         *ROOT.glob(".github/workflows/*.yaml"),
     ]
-    return sorted(path for path in candidates if path not in RETIRED_ENTRYPOINTS)
+    return sorted(candidates)
 
 
 FORBIDDEN = {
@@ -55,10 +65,23 @@ SCHEDULE_LABELS = (
     "com.vera.apartment-search.weekly",
 )
 
+SCHEDULE_ENTRYPOINTS = {
+    "com.vera.apartment-search.daily": "scripts/run_daily_autonomous.sh",
+    "com.vera.apartment-search.nightly": "scripts/run_nightly_autonomous.sh",
+    "com.vera.apartment-search.watchdog": "scripts/watchdog_stale_run.sh",
+    "com.vera.apartment-search.weekly": "scripts/run_weekly_autonomous.sh",
+}
+
 
 def main() -> int:
     failures: list[str] = []
     files = active_files()
+
+    for path in sorted(RETIRED_PATHS):
+        if path.exists():
+            failures.append(
+                f"{path.relative_to(ROOT)}: retired path must remain absent"
+            )
 
     for path in files:
         text = path.read_text(errors="replace")
@@ -70,7 +93,7 @@ def main() -> int:
 
     wrappers = [
         ROOT / "scripts" / f"run_{cadence}_autonomous.sh"
-        for cadence in ("hourly", "daily", "nightly", "weekly")
+        for cadence in ("daily", "nightly", "weekly")
     ]
     for path in wrappers:
         text = path.read_text()
@@ -78,19 +101,6 @@ def main() -> int:
             failures.append(
                 f"{path.relative_to(ROOT)}: missing external publication state"
             )
-
-    installer = ROOT / "scripts" / "install_launch_agents.sh"
-    installer_text = installer.read_text()
-    if "RETIRED:" not in installer_text or not re.search(
-        r"^exit 1$", installer_text, re.M
-    ):
-        failures.append(
-            "scripts/install_launch_agents.sh: installer is not hard-disabled"
-        )
-    if re.search(r"\blaunchctl\b", installer_text):
-        failures.append(
-            "scripts/install_launch_agents.sh: retired installer still calls launchctl"
-        )
 
     for helper_name in ("launch_agents_status.sh", "remove_launch_agents.sh"):
         helper = ROOT / "scripts" / helper_name
@@ -113,6 +123,14 @@ def main() -> int:
         failures.append(
             "configs/launchd-v2: template set does not match the loaded agent set"
         )
+    canonical_engine = "/Users/davidmarsh/Code/Personal/vera-apartment-search"
+    for label, relative_entrypoint in SCHEDULE_ENTRYPOINTS.items():
+        template = ROOT / "configs" / "launchd-v2" / f"{label}.plist"
+        expected_entrypoint = f"{canonical_engine}/{relative_entrypoint}"
+        if template.exists() and expected_entrypoint not in template.read_text():
+            failures.append(
+                f"{template.relative_to(ROOT)}: expected {expected_entrypoint}"
+            )
 
     health_text = (ROOT / "scripts" / "health_check.sh").read_text()
     if "scripts/install_launch_agents.sh" in health_text:
@@ -121,6 +139,22 @@ def main() -> int:
         expected = f"configs/launchd-v2/{label}.plist"
         if expected not in health_text:
             failures.append(f"scripts/health_check.sh: missing {expected}")
+
+    handoff = ROOT / "VERA-HANDOFF.md"
+    if not handoff.exists():
+        failures.append("VERA-HANDOFF.md: canonical cross-repository handoff is missing")
+    else:
+        handoff_text = handoff.read_text()
+        required_handoff_markers = (
+            "https://littlefightnyc.com/vera/",
+            "/Users/davidmarsh/Code/Personal/vera-apartment-search",
+            "/Users/davidmarsh/Code/LiFi NYC/Little Fight NYC Business/Website/littlefightnyc-website",
+            "scripts/public_lens.py",
+            "0907d8fe-7018-48db-a6be-1f906e4b2619",
+        )
+        for marker in required_handoff_markers:
+            if marker not in handoff_text:
+                failures.append(f"VERA-HANDOFF.md: missing canonical marker {marker}")
 
     if failures:
         print("VERA public-product boundary FAILED:")

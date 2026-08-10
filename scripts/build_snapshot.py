@@ -115,7 +115,7 @@ def load_current_paths() -> dict[str, Path | None]:
         "duplicate_report": latest_path(REPORT_ROOT / "weekly", "duplicate_cluster_report_*.md"),
         "shortlist_csv": latest_path(EXPORT_ROOT, "shortlist_*.csv"),
         "scored_csv": latest_path(EXPORT_ROOT, "scored_inventory_*.csv"),
-        "run_log": latest_path(LOG_ROOT, "run_hourly_*.log") or latest_path(LOG_ROOT, "run_daily_*.log") or latest_path(LOG_ROOT, "run_weekly_*.log"),
+        "run_log": latest_path(LOG_ROOT, "run_daily_*.log") or latest_path(LOG_ROOT, "run_weekly_*.log"),
     }
 
 

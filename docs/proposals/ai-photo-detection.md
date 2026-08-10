@@ -1,6 +1,6 @@
 # AI-photo detection — what shipped, what didn't, and why
 
-**Date:** 2026-08-03 · **Status:** deterministic tier shipped; ML tier deliberately deferred (needs David's call)
+**Date:** 2026-08-03 · **Status:** deterministic and classifier tiers shipped; classifier output remains evidence-only
 
 ## The problem
 
@@ -53,12 +53,7 @@ and extremely common in rental listings, and detectors flag it readily.
 Telling a renter a legitimately staged photo is "probably AI" is the kind of
 confident wrongness VERA exists to avoid.
 
-**If David wants it anyway** (say the word), the shape is: export
-`Ateeqq/ai-vs-human-image-detector` to ONNX once, host the ~400MB artifact
-outside git (Netlify large media or an HF model repo under his account),
-and run inference with `onnxruntime` alone (~50MB) in both environments —
-surfaced as "AI-photo likelihood: N%" with virtual-staging caveat text, and
-still excluded from the score.
+**Rejected alternative:** exporting `Ateeqq/ai-vs-human-image-detector` to ONNX would add a separately hosted model artifact and another runtime. The shipped `umm-maybe/AI-image-detector` path supersedes that proposal.
 
 
 ## Licence obligation (added 2026-08-04)
