@@ -1,78 +1,34 @@
-# Scoring Rules
+# Interpret VERA scoring
 
-This bot starts with a 100-point scoring framework and stays conservative with claims.
+VERA ranks evidence; it does not certify a listing, landlord, building, or legal outcome. Executable scoring behavior lives in `scripts/score_listings.py`, `scripts/enrich_listings.py`, `config/listing_confidence.py`, and the owner-approved search configuration. This document defines the stable interpretation contract without duplicating changeable personal criteria.
 
-## Score Buckets
+## Evidence groups
 
-### Search Fit: 35 points
+The overall score combines these groups:
 
-- Neighborhood fit: 12
-- Price fit: 10
-- Unit type fit: 5
-- Freshness: 8
+- Search fit
+- Independent-landlord evidence
+- Building and landlord safety evidence
+- Rent-stability evidence
+- Listing completeness and scam-resistance evidence
 
-### Independent Landlord Fit: 20 points
+Each listing must expose component scores and plain-language reasons. Missing or synthetic risk data must reduce confidence or require manual review; it must never become favorable evidence by default.
 
-- By-owner language: 8
-- Owner-scale signals: 6
-- Non-corporate contact pattern: 6
+## Recommendations
 
-### Building And Landlord Safety: 20 points
+- `pursue`: the listing passes current hard filters and the highest current scoring threshold without a severe red flag
+- `pursue cautiously`: the listing clears the configured cautious threshold but retains material caveats
+- `manual review`: evidence is incomplete, conflicting, or too weak for an automated recommendation
+- `skip`: the listing fails a hard filter, falls below the configured threshold, or carries a major red flag
 
-- HPD signal quality: 8
-- DOB or similar building-risk signal: 4
-- Ownership clarity: 4
-- No bad-actor pattern: 4
+Thresholds, price ceilings, target neighborhoods, unit preferences, and forensic deductions are executable configuration. Do not copy their values into public documentation or change them without David's approval.
 
-### Rent-Stability Upside: 10 points
+## Invariants
 
-- Public reference hit: 6
-- Building age and size clues: 4
+- A listing without a public-record match must not produce a clean building score
+- No missing field may inflate a grade or recommendation
+- Probabilistic AI-photo output remains evidence, not proof, and does not change the score
+- Protected-class signals never enter scoring
+- Public output carries explanations and source links but no private contact, note, preference, or watchlist field
 
-### Listing Quality And Scam Resistance: 15 points
-
-- Data completeness: 5
-- Address plausibility: 3
-- Credible photos: 3
-- Contact consistency: 2
-- Duplicate sanity: 2
-
-## Recommendation Thresholds
-
-- `pursue`: 80 and above, with hard filters passed and no severe red flag
-- `pursue cautiously`: 60 to 79, or strong fit with meaningful caveats
-- `skip`: below 60, failed hard filter, or major red flag
-
-## Hard Filters
-
-A listing only counts as qualified if it is:
-
-- in a target neighborhood
-- studio or 1 bedroom
-- at or under `$2500`
-- not clearly a room share
-- not clearly sublet-only if the listing reads temporary or unstable
-
-## Positive Signals
-
-- direct-owner language
-- no-fee language
-- complete or verifiable address
-- small-building cues
-- consistent owner identity across listing and record checks
-- decent photo set
-- honest-looking description without luxury padding
-
-## Negative Signals
-
-- management-company branding
-- luxury leasing-office language
-- suspiciously vague address
-- weak or inconsistent contact details
-- repeated spammy duplicates
-- bad-actor watchlist hit
-- severe HPD or DOB pattern
-
-## Important Rule
-
-The bot should score evidence, not confidence theater. If data is thin, the score should reflect that thinness.
+Run `python3 tests/test_scoring.py`, `python3 tests/test_public_lens.py`, and `python3 tests/test_neighborhood_gate.py` after a scoring, enrichment, hard-filter, or geography change.

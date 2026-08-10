@@ -1,6 +1,6 @@
 # VERA engine source of truth
 
-Verified 2026-08-08.
+Verified 2026-08-10. See `VERA-HANDOFF.md` for cross-repository recovery, schedules, validation commands, and dated live evidence.
 
 ## Public product
 
@@ -19,7 +19,7 @@ Little Fight Netlify project owns the page, its assets, the routes, and the
 public response surface. VERA has no second public application or deploy
 target.
 
-## Private engine
+## Separate engine and private runtime
 
 - Canonical local checkout: `/Users/davidmarsh/Code/Personal/vera-apartment-search`
 - Canonical repository: `https://github.com/omgitsthedm/vera-apartment-search`, branch `main`
@@ -51,10 +51,11 @@ upstream feed files. That feed branch is an implementation detail and sanitized
 upstream; it is not a browser-facing product. Visitors stay on
 `littlefightnyc.com` for the entire VERA experience.
 
-The historical `nyc-apartment-search-dashboard` checkout and `vera-pipeline`
-Netlify project are retired, nondeployable references. Never sync or publish
-into the dashboard checkout, run its Netlify deploy path, restore a dedicated
-VERA Netlify site, or add VERA Netlify credentials. Any older documentation
+The historical `nyc-apartment-search-dashboard` source is retained only in the
+archived private `omgitsthedm/vera-dashboard` repository, and the former
+`vera-pipeline` Netlify project is deleted. Never restore a dashboard checkout,
+run its Netlify deploy path, restore a dedicated VERA Netlify site, or add VERA
+Netlify credentials. Any older documentation
 that instructs an operator to use `NETLIFY_AUTH_TOKEN`, `NETLIFY_SITE_ID`, or a
 separate VERA host is superseded by this file.
 

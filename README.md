@@ -1,61 +1,58 @@
-# VERA — verified NYC apartment hunting
+# VERA: verified NYC apartment hunting
 
-**Every claim on the page survives the question "how do you know that?"**
+VERA is a verification-first New York City apartment-search engine. It gathers listings from fragmented public sources, checks available claims against city records, explains uncertainty, and publishes a privacy-filtered public feed for [Little Fight NYC's VERA demo](https://littlefightnyc.com/vera/).
 
-VERA is an open, verification-first engine for finding privately-owned
-NYC rentals — no brokers, no corporate landlords, no scams. It sweeps
-the fragmented channels where small landlords actually post, joins every
-listing against the city's own records, and publishes a curated daily
-drop of at most eight listings that clear every gate — with an honest
-public ledger of everything it passed on and why.
+The Today view shows at most eight listings that clear the current published gates. Market and Browse expose the wider sanitized net so visitors can inspect what VERA rejected, what needs verification, and why.
 
-**Live:** https://littlefightnyc.com/vera/ · the field manual and daily
-receipts are free at `/vera/manual/` and `/vera/archive/`.
+## Public product and separate engine
 
-## What it computes (all cited or ≈-marked)
-- **Steward Grade** — does this owner fix things? A–E from HPD
-  violations, heat/hot-water complaints, bedbug filings, housing-court
-  history, DOB records. No data grades `?`, never an A.
-- **Scam forensics** — relist detection (a fresh posting can't reset the
-  true days-on-market), contact reuse across listings, template
-  descriptions, perceptual-hash photo clones, and an AI-photo classifier
-  read (Hugging Face, probabilistic on its face).
-- **The money, by law** — deposit and application-fee caps, FARE-Act
-  broker-fee rules, a cash-to-keys total on every listing.
-- **Ownership chain-of-proof** — deed → HPD registration → DOS entity →
-  portfolio, with links to walk it yourself.
-- **Honest commutes** — MTA GTFS stations and timetable-quoted ride
-  minutes. Nothing invented, everything ≈-marked.
+The browser application lives in the Little Fight NYC website repository at `/app/public/vera/`. This public repository remains the separate processing engine because unfiltered source payloads, private runtime state, credentials, and owner-only fields must never enter the website repository or Netlify.
 
-## What it refuses
-No accounts. No tracking. No urgency theater. No AI chat. No landlord
-contact, ever. No protected-class signals anywhere in scoring —
-see `/vera/corrections/` for the fair-housing statement and the
-owner correction channel.
+The browser reads only these first-party routes:
 
-## Run it
-Python 3.12+, stdlib + Pillow. `scripts/run_daily.sh` runs the pipeline;
-GitHub Actions runs the cloud sweep daily (`.github/workflows/`). Feed
-contract: `configs/snapshot_schema.md`. The public browser reads only Little
-Fight's `/vera/data/{public,archive,meta}.json` routes. Agent rules:
-`AGENTS.md`.
+- `/vera/data/public.json`
+- `/vera/data/archive.json`
+- `/vera/data/meta.json`
 
-Built by [Little Fight NYC](https://littlefightnyc.com). AGPL-3.0 intent
-for code; data derivations carry their sources' terms (MTA GTFS, NYC
-Open Data, StreetEasy public CSVs).
+GitHub Actions publishes the three sanitized files to this repository's orphan `feed` branch. `scripts/public_lens.py` removes private fields, and `audit_public_payload()` blocks a publication that fails the privacy contract.
+
+## What VERA computes
+
+- **Steward Grade**: building-level evidence from Housing Preservation and Development (HPD), Department of Buildings (DOB), 311, and related public records; missing evidence renders `?`, not a favorable grade
+- **Listing-risk evidence**: relist history, contact reuse, description similarity, perceptual photo hashes, and a clearly labeled probabilistic AI-photo signal
+- **Move-in cost context**: deposit, fee, and cash-to-keys estimates with source and legal caveats
+- **Ownership evidence**: deed, registration, entity, and portfolio links where the available records support them
+- **Transit context**: Metropolitan Transportation Authority (MTA) General Transit Feed Specification (GTFS) stations and timetable-derived ride minutes, with approximate walking time marked as approximate
+
+VERA does not guarantee that a listing is legitimate, available, broker-free, privately owned, or suitable. It exposes evidence and uncertainty so a person can verify the listing before paying or applying.
+
+## Safety contract
+
+VERA has no public account system, advertising, or analytics. Browser hunt state stays in local storage. The engine never contacts landlords or submits applications.
+
+Do not run the pipeline, change schedules, publish the cloud feed, alter search criteria, or change scoring weights without the authorization required by `AGENTS.md`.
+
+## Run and verify the engine
+
+Python 3.12 or newer runs the deterministic engine. Optional enrichment dependencies are installed only in the environment that uses them. Ollama is not required.
+
+Run the six isolated checks before changing an operational boundary:
+
+```bash
+python3 tests/test_scoring.py
+python3 tests/test_mail_ingest.py
+python3 tests/test_public_lens.py
+python3 tests/test_source_honesty.py
+python3 tests/test_neighborhood_gate.py
+python3 tests/test_public_product_boundary.py
+```
+
+Read `AGENTS.md` before work, `SOURCE_OF_TRUTH.md` for stable routing, `configs/snapshot_schema.md` for the feed contract, `configs/schedules.md` for cadence, and `VERA-HANDOFF.md` for cross-repository recovery.
 
 ## Credits
 
-VERA stands on public data and open work:
+VERA uses New York City Open Data, NYC Planning GeoSearch, MTA GTFS data, JustFix Who Owns What, MapLibre GL, OpenFreeMap, and the `umm-maybe/AI-image-detector` model. Check each source's current terms before redistributing data or derivatives.
 
-- **NYC Open Data** — HPD violations, complaints and registrations, DOB
-  records, 311, PLUTO, ACRIS.
-- **NYC Department of City Planning** — NTA2020 neighbourhood boundaries,
-  and the keyless [GeoSearch](https://geosearch.planninglabs.nyc/) geocoder.
-- **MTA** — GTFS static schedules for stations and ride times.
-- **[JustFix](https://whoownswhat.justfix.org/)** — the Who Owns What API,
-  which links buildings into landlord portfolios.
-- **AI-photo detection** — [`umm-maybe/AI-image-detector`](https://huggingface.co/umm-maybe/AI-image-detector),
-  licensed CC BY 4.0.
-- **[MapLibre GL](https://maplibre.org/)** (BSD-3) over
-  **[OpenFreeMap](https://openfreemap.org/)** tiles, from OpenStreetMap data.
+## License status
+
+This repository is public, but it does not currently include a license file. Public visibility does not grant permission to copy, modify, or redistribute the code. Do not describe VERA as open source or AGPL-licensed until David selects and adds an explicit license.

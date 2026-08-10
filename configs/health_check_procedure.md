@@ -1,32 +1,22 @@
-# Health Check Procedure
+# Check engine health
 
-Run:
+Run the health check from the canonical engine checkout:
 
 ```bash
 cd /Users/davidmarsh/Code/Personal/vera-apartment-search
 ./scripts/health_check.sh
 ```
 
-## What It Checks
+The script verifies the canonical project structure, required source and configuration files, active LaunchAgent templates, and writable private runtime directories. It recreates missing ignored runtime directories before checking them.
 
-- project root exists
-- logs directory exists
-- required config files exist
-- required scripts exist
-- output directories are writable
-- `ollama` is available on the machine
-- expected local models are installed
+Ollama is optional. The deterministic pipeline does not require a local large language model, and the health check reports an absent Ollama installation as an optional capability rather than a failure.
 
-## If A Check Fails
+If a check fails:
 
-- Missing folder: create or restore the folder inside the project root
-- Missing config: restore it from version control or rebuild it manually from this project
-- Missing model: pull it locally with `ollama pull <model>`
-- Permission failure: verify the canonical Code checkout is writable
-- Script missing: rebuild the script before running the pipeline
+- Restore a missing tracked file from verified Git history
+- Confirm that the canonical Code checkout is writable
+- Confirm that all four `configs/launchd-v2/` templates still point to the canonical engine path
+- Review the newest private log under `/Users/davidmarsh/Code/Personal/vera-apartment-search/logs/` without copying it into Git or a public handoff
+- Run the isolated tests in `VERA-HANDOFF.md` before any authorized pipeline or schedule action
 
-## Recommended Habit
-
-- Run health checks before enabling any schedule
-- Run health checks after changing configs or models
-- Review the newest log in `/Users/davidmarsh/Code/Personal/vera-apartment-search/logs/` after any failure
+Do not enable, replace, or remove a schedule as part of a health check. Schedule maintenance requires separate authorization.
