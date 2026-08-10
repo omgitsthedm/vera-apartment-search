@@ -112,14 +112,14 @@ Use the narrowest proportional lane. A production candidate requires `quality:re
 
 ## Evidence snapshot
 
-This snapshot was collected on 2026-08-10 before the documentation closeout. Re-run the commands below before treating any revision, count, or workflow result as current.
+This snapshot was collected on 2026-08-10 and reconciled after the documentation closeout. Re-run the commands below before treating any revision, count, or workflow result as current.
 
 | Evidence | Observed value |
 | --- | --- |
 | Website GitHub `main` | `8f43c9a7b80791ac067702cfb9ee51934dbc33ca` |
 | Live `/release.json` revision | `8f43c9a7b80791ac067702cfb9ee51934dbc33ca`, production, clean source, built `2026-08-10T20:57:03.846Z` |
 | Netlify production deploy | `6a7a3b011b38280008c5886a`, ready, Git-connected `main`, published `2026-08-10T20:57:16.023Z` |
-| Engine GitHub `main` baseline | `3604daab0f4e4f1dfbd434284756da4175668b70` |
+| Engine GitHub `main` | `5988ff4c071565f9cfbc91b12a66719e31cc240e` |
 | Engine `feed` branch | `a0d8509668000945fcc0e0fc3a9c42d7abef3422` |
 | Historical dashboard `main` | `ec61413b2ed6fb6225b46c706ab0711f65fe8d85`, GitHub repository archived and private |
 | Latest observed cloud sweep | [Run 31363590525](https://github.com/omgitsthedm/vera-apartment-search/actions/runs/31363590525), successful on engine revision `3604daab0f4e4f1dfbd434284756da4175668b70` |
