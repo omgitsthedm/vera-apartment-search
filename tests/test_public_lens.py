@@ -7,9 +7,8 @@ and the cloud sweep publishes with it unattended, to a public URL, with no
 human between the run and the world.
 
 Every leak found in this system so far arrived the same way: a new section
-was added and nobody remembered to sanitize it. So these tests do not just
-check the sections that exist today. They add sections that did not exist
-when the lens was written, and require the lens to strip them anyway.
+was added and nobody remembered to treat it as private. These tests verify
+the stronger rule: a field is absent unless the public schema admits it.
 """
 from __future__ import annotations
 
@@ -87,25 +86,28 @@ def test_a_section_nobody_sanitized() -> None:
     hunt = {
         "generated_at": "2026-08-04T00:00:00+00:00",
         "shortlist": [],
-        # None of these keys exist in the lens. They must still be cleaned.
+        # Neither section exists in the public schema.
         "landlord_outreach_v3": {"queue": [{"unit": "3R", **PERSONAL}]},
         "deeply": {"nested": [{"under": {"several": {"levels": PERSONAL}}}]},
     }
     pub = PL.build_public_payload(hunt)
     blob = json.dumps(pub)
-    check("an unknown top-level section is still stripped",
+    check("an unknown top-level section is stripped",
           "contact_phone" not in blob and "917-555-0142" not in blob)
-    check("stripping reaches arbitrary depth",
+    check("unknown data at arbitrary depth is stripped",
           "analyst_notes" not in blob and "she sounded motivated" not in blob)
-    check("the section itself survives — this strips fields, not features",
-          "landlord_outreach_v3" in pub and pub["landlord_outreach_v3"]["queue"][0]["unit"] == "3R")
+    check("the unknown section itself is private by default",
+          "landlord_outreach_v3" not in pub and "deeply" not in pub)
 
 
 def test_watchlist_accusations_are_neutralized() -> None:
     print("\nowner accusations vs public record:")
     hunt = {
         "generated_at": "2026-08-04T00:00:00+00:00",
-        "shortlist": [listing(risk_note="Owner is a known scammer", hpd_open_violations=19)],
+        "shortlist": [listing(
+            trust_caveats=["Owner is a known scammer"],
+            hpd_open_violations=19,
+        )],
         "risk_watch": ["matched the bad-actor list"],
         "messages": ["blacklist hit on this BBL"],
     }
@@ -145,15 +147,22 @@ def test_archive_cannot_outrun_the_feed() -> None:
         extras={"pool": [listing()]},
     )
     with tempfile.TemporaryDirectory() as d:
+        Path(d, "archive.json").write_text(json.dumps([{
+            "date": "2026-08-03",
+            "run_id": "old-run",
+            "listings": [{"listing_uid": "old", "contact_phone": "917-555-0142"}],
+            "private_note": "must not survive a re-publish",
+        }]))
         stat = PL.maintain_archive(pub, d)
         text = (Path(d) / "archive.json").read_text()
         check("today's full-fit listing is archived", stat["archived"] == 1, str(stat))
-        check("the archive carries no personal field",
-              not any(f in text for f in PL.PERSONAL_FIELDS))
+        check("the archive carries no personal field, including prior entries",
+              not any(f in text for f in PL.PERSONAL_FIELDS) and "private_note" not in text)
         # re-publishing the same day must replace, not stack
         PL.maintain_archive(pub, d)
         again = json.loads((Path(d) / "archive.json").read_text())
-        check("a re-publish replaces the day rather than duplicating it", len(again) == 1, str(len(again)))
+        check("a re-publish replaces its day rather than duplicating it",
+              sum(item.get("date") == "2026-08-04" for item in again) == 1, str(len(again)))
 
 
 def test_the_audit_catches_what_the_lens_would_miss() -> None:
@@ -162,11 +171,15 @@ def test_the_audit_catches_what_the_lens_would_miss() -> None:
     print("\nthe independent guard:")
     clean = PL.build_public_payload({"generated_at": "x", "shortlist": [listing()]})
     check("a properly built payload audits clean", PL.audit_public_payload(clean) == [])
+    cloud = json.loads(json.dumps(clean))
+    cloud["origin"] = "cloud"
+    check("the cloud publisher's origin label audits clean", PL.audit_public_payload(cloud) == [])
 
     leaked = json.loads(json.dumps(clean))
     leaked["some_new_export"] = {"rows": [{"contact_phone": "917-555-0142"}]}
     problems = PL.audit_public_payload(leaked)
-    check("a hand-injected personal field is caught", len(problems) == 1, str(problems))
+    check("a hand-injected personal field is caught",
+          any("contact_phone" in p for p in problems), str(problems))
 
     accused = json.loads(json.dumps(clean))
     accused["note"] = "flagged on the bad actor list"
@@ -177,6 +190,58 @@ def test_the_audit_catches_what_the_lens_would_miss() -> None:
     unlabelled.pop("lens")
     check("a payload not labelled 'public' is caught",
           any("lens" in p for p in PL.audit_public_payload(unlabelled)))
+
+
+def test_public_schema_is_complete_and_private_by_default() -> None:
+    print("\nexplicit listing schema and generic sensitive guards:")
+    source = listing(
+        owner_email="owner@example.com",
+        unusual_safe_new_field="do not publish this yet",
+        component_scores={"search_fit": 8, "private_token": "not public"},
+        landlord_portfolio={"bldgs": 2, "contact_name": "Maria Ortega"},
+        transit={"station": "Lorimer St", "lines": ["L", "G"], "phone": "917-555-0142"},
+        price_history=[["2026-08-01", 2200], ["not-a-date-only"], {"rent": 2200}],
+    )
+    pub = PL.build_public_payload(
+        {"generated_at": "x", "shortlist": [source]},
+        extras={"pool": [source]},
+    )
+    entry = pub["pool"][0]
+    check("legitimate UI fields remain", entry.get("listing_uid") == "u1" and entry.get("rent") == 2200)
+    check("alternate sensitive names are absent",
+          "owner_email" not in entry and "unusual_safe_new_field" not in entry)
+    check("nested objects are projected too",
+          entry.get("component_scores") == {"search_fit": 8}
+          and entry.get("landlord_portfolio") == {"bldgs": 2}
+          and entry.get("transit") == {"station": "Lorimer St", "lines": ["L", "G"]})
+    check("malformed nested value shapes are absent", entry.get("price_history") == [["2026-08-01", 2200]])
+    check("clean projection passes the independent audit", PL.audit_public_payload(pub) == [])
+
+    injected = json.loads(json.dumps(pub))
+    injected["pool"][0]["alternate_contact_channel"] = "owner@example.com"
+    injected["pool"][0]["component_scores"]["future_metric"] = 9
+    injected["pool"][0]["trust_caveats"] = ["Call +1 (917) 555-0142"]
+    problems = PL.audit_public_payload(injected)
+    check("generic sensitive key and value checks reject alternate names",
+          any("alternate_contact_channel" in p for p in problems)
+          and any("email-like value" in p for p in problems)
+          and any("phone-like value" in p for p in problems), str(problems))
+    check("nested unknown keys are rejected",
+          any("component_scores.future_metric" in p for p in problems), str(problems))
+
+
+def test_audit_scans_every_listing_not_only_the_first_400() -> None:
+    print("\nthe complete publication traversal:")
+    clean = PL.build_public_payload(
+        {"generated_at": "x", "shortlist": [listing()]},
+        extras={"pool": [listing()]},
+    )
+    base = clean["pool"][0]
+    clean["pool"] = [dict(base, listing_uid=f"u{index}") for index in range(401)]
+    clean["pool"].append(dict(base, listing_uid="leak-after-400", contact_phone="917-555-0142"))
+    problems = PL.audit_public_payload(clean)
+    check("a leak after item 400 is caught",
+          any("pool[401].contact_phone" in p for p in problems), str(problems))
 
 
 def test_hunt_lens_stays_private_by_contrast() -> None:
@@ -199,6 +264,8 @@ if __name__ == "__main__":
     test_owner_only_and_watchlist_sections()
     test_archive_cannot_outrun_the_feed()
     test_the_audit_catches_what_the_lens_would_miss()
+    test_public_schema_is_complete_and_private_by_default()
+    test_audit_scans_every_listing_not_only_the_first_400()
     test_hunt_lens_stays_private_by_contrast()
     print()
     if FAILURES:
