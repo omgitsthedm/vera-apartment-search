@@ -128,7 +128,7 @@ def test_owner_only_and_watchlist_sections() -> None:
                     review_out_reason="too far", raw_snapshot_path="/Users/davidmarsh/x.json")]
     pub = PL.build_public_payload(hunt, extras={
         "pool": pool,
-        "state_buckets": {"pursue": [listing()], "skip": [listing(), listing()]},
+        "state_buckets": {"shortlisted": [listing()], "filtered_out": [listing(), listing()], "other": [listing()]},
     })
     check("the manual watchlist section is dropped", "watchlist" not in pub)
     got = set(pub["pool"][0].keys())
@@ -136,7 +136,7 @@ def test_owner_only_and_watchlist_sections() -> None:
           not (got & PL.PUBLIC_DROP_FIELDS), str(sorted(got & PL.PUBLIC_DROP_FIELDS)))
     check("no local filesystem path ships", "davidmarsh" not in json.dumps(pub))
     check("state_buckets publishes counts, not a second copy of every record",
-          pub["state_buckets"] == {"pursue": 1, "skip": 2}, str(pub["state_buckets"]))
+          pub["state_buckets"] == {"shortlisted": 1, "filtered_out": 2}, str(pub["state_buckets"]))
     check("the payload is labelled as the public lens", pub.get("lens") == "public")
 
 
@@ -190,6 +190,48 @@ def test_the_audit_catches_what_the_lens_would_miss() -> None:
     unlabelled.pop("lens")
     check("a payload not labelled 'public' is caught",
           any("lens" in p for p in PL.audit_public_payload(unlabelled)))
+
+
+def test_audit_fails_closed_for_malformed_public_containers() -> None:
+    print("\nmalformed known containers fail closed:")
+    clean = PL.build_public_payload(
+        {"generated_at": "x", "shortlist": [listing()]},
+        extras={
+            "pool": [listing()],
+            "state_buckets": {"shortlisted": [listing()]},
+            "transit_tables": {"L": [["Lorimer St", 180]]},
+        },
+    )
+    check("the valid container shapes audit clean", PL.audit_public_payload(clean) == [])
+
+    malformed_pool = json.loads(json.dumps(clean))
+    malformed_pool["pool"] = {"not": "an array"}
+    check("a non-array pool fails", any("$.pool — must be an array" in p for p in PL.audit_public_payload(malformed_pool)))
+
+    malformed_buckets = json.loads(json.dumps(clean))
+    malformed_buckets["state_buckets"] = {"invented_bucket": 1, "shortlisted": "one"}
+    bucket_problems = PL.audit_public_payload(malformed_buckets)
+    check("unknown or non-count state buckets fail",
+          any("invented_bucket" in p and "schema" in p for p in bucket_problems)
+          and any("shortlisted" in p and "count" in p for p in bucket_problems), str(bucket_problems))
+
+    malformed_transit = json.loads(json.dumps(clean))
+    malformed_transit["transit_tables"] = {"L": "not a stop array", "G": [["Court Sq", -1]]}
+    transit_problems = PL.audit_public_payload(malformed_transit)
+    check("malformed transit tables fail",
+          any("transit_tables.L" in p and "array" in p for p in transit_problems)
+          and any("transit_tables.G[0]" in p for p in transit_problems), str(transit_problems))
+
+    malformed_nested = json.loads(json.dumps(clean))
+    malformed_nested["pool"][0]["transit"] = "not an object"
+    check("malformed nested containers fail",
+          any("pool[0].transit — must be an object" in p for p in PL.audit_public_payload(malformed_nested)))
+
+    malformed_market = json.loads(json.dumps(clean))
+    malformed_market["market_context"] = {"series": {"all_nyc": {"median_asking_rent": "not an array"}}}
+    check("malformed market-series containers fail",
+          any("market_context.series.all_nyc.median_asking_rent — must be an array" in p
+              for p in PL.audit_public_payload(malformed_market)))
 
 
 def test_public_schema_is_complete_and_private_by_default() -> None:
@@ -277,6 +319,7 @@ if __name__ == "__main__":
     test_owner_only_and_watchlist_sections()
     test_archive_cannot_outrun_the_feed()
     test_the_audit_catches_what_the_lens_would_miss()
+    test_audit_fails_closed_for_malformed_public_containers()
     test_public_schema_is_complete_and_private_by_default()
     test_audit_scans_every_listing_not_only_the_first_400()
     test_hunt_lens_stays_private_by_contrast()

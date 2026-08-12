@@ -121,6 +121,10 @@ PUBLIC_DAILY_CHANGE_FIELDS = frozenset({"counts", "date", "generated_at", "gone_
 PUBLIC_DAILY_COUNT_FIELDS = frozenset({"back", "gone", "new", "price_drop", "price_hike", "stale", "unchanged"})
 PUBLIC_MARKET_CONTEXT_FIELDS = frozenset({"months", "series"})
 PUBLIC_MARKET_SERIES_FIELDS = frozenset({"area_type", "median_asking_rent", "median_asking_rent_latest", "rental_inventory_latest"})
+PUBLIC_STATE_BUCKET_FIELDS = frozenset({
+    "archived", "duplicate", "filtered_out", "needs_manual_review", "new",
+    "parse_failed", "shortlisted",
+})
 
 # A count is a public aggregate, not a contact channel. Keep this exception
 # narrow and type-checked: spelling it like a contact field must not let a
@@ -575,7 +579,9 @@ def build_public_payload(hunt: dict[str, Any],
             public["state_buckets"] = {
                 key: (len(value) if isinstance(value, list) else value)
                 for key, value in buckets.items()
-                if isinstance(key, str) and isinstance(value, (int, float, bool, list))
+                if (key in PUBLIC_STATE_BUCKET_FIELDS
+                    and ((isinstance(value, list))
+                         or (isinstance(value, int) and not isinstance(value, bool) and value >= 0)))
             }
 
     return public
@@ -675,33 +681,84 @@ def audit_public_payload(public: Any) -> list[str]:
     problems: list[str] = []
 
     def schema_keys(node: Any, path: str, allowed: frozenset[str]) -> None:
-        if not isinstance(node, dict):
-            return
         for key in node:
             if key not in allowed:
                 problems.append(f"{path}.{key} — not in public schema")
 
+    def object_field(parent: dict[str, Any], key: str, path: str,
+                     allowed: frozenset[str]) -> dict[str, Any] | None:
+        if key not in parent:
+            return None
+        value = parent[key]
+        if not isinstance(value, dict):
+            problems.append(f"{path} — must be an object")
+            return None
+        schema_keys(value, path, allowed)
+        return value
+
+    def list_field(parent: dict[str, Any], key: str, path: str) -> list[Any] | None:
+        if key not in parent:
+            return None
+        value = parent[key]
+        if not isinstance(value, list):
+            problems.append(f"{path} — must be an array")
+            return None
+        return value
+
+    def string_list_field(parent: dict[str, Any], key: str, path: str) -> None:
+        values = list_field(parent, key, path)
+        if values is not None and any(not isinstance(value, str) for value in values):
+            problems.append(f"{path} — must contain only strings")
+
+    def object_list_field(parent: dict[str, Any], key: str, path: str,
+                          allowed: frozenset[str]) -> None:
+        values = list_field(parent, key, path)
+        if values is None:
+            return
+        for index, value in enumerate(values):
+            if not isinstance(value, dict):
+                problems.append(f"{path}[{index}] — must be an object")
+                continue
+            schema_keys(value, f"{path}[{index}]", allowed)
+
     def listing_rows(node: Any, path: str) -> None:
+        if node is None:
+            return
         if not isinstance(node, list):
+            problems.append(f"{path} — must be an array")
             return
         for index, item in enumerate(node):
             item_path = f"{path}[{index}]"
-            schema_keys(item, item_path, PUBLIC_LISTING_FIELDS)
             if not isinstance(item, dict):
+                problems.append(f"{item_path} — must be an object")
                 continue
-            schema_keys(item.get("component_scores"), f"{item_path}.component_scores", PUBLIC_COMPONENT_SCORE_FIELDS)
-            schema_keys(item.get("landlord_portfolio"), f"{item_path}.landlord_portfolio", PUBLIC_PORTFOLIO_FIELDS)
-            schema_keys(item.get("transit"), f"{item_path}.transit", PUBLIC_TRANSIT_FIELDS)
-            schema_keys(item.get("change_detail"), f"{item_path}.change_detail", PUBLIC_CHANGE_DETAIL_FIELDS)
+            schema_keys(item, item_path, PUBLIC_LISTING_FIELDS)
+            object_field(item, "component_scores", f"{item_path}.component_scores", PUBLIC_COMPONENT_SCORE_FIELDS)
+            portfolio = object_field(item, "landlord_portfolio", f"{item_path}.landlord_portfolio", PUBLIC_PORTFOLIO_FIELDS)
+            if portfolio is not None:
+                string_list_field(portfolio, "topowners", f"{item_path}.landlord_portfolio.topowners")
+            transit = object_field(item, "transit", f"{item_path}.transit", PUBLIC_TRANSIT_FIELDS)
+            if transit is not None:
+                string_list_field(transit, "lines", f"{item_path}.transit.lines")
+            object_field(item, "change_detail", f"{item_path}.change_detail", PUBLIC_CHANGE_DETAIL_FIELDS)
             if "contact_reuse_count" in item:
                 count = item["contact_reuse_count"]
                 if not (isinstance(count, (int, float)) and not isinstance(count, bool) and count >= 0):
                     problems.append(f"{item_path}.contact_reuse_count — not a non-negative public aggregate")
-            for key, fields in (("illegal_demands", PUBLIC_ILLEGAL_DEMAND_FIELDS),
-                                ("scam_cues_found", PUBLIC_SCAM_CUE_FIELDS)):
-                if isinstance(item.get(key), list):
-                    for child_index, child in enumerate(item[key]):
-                        schema_keys(child, f"{item_path}.{key}[{child_index}]", fields)
+            object_list_field(item, "illegal_demands", f"{item_path}.illegal_demands", PUBLIC_ILLEGAL_DEMAND_FIELDS)
+            object_list_field(item, "scam_cues_found", f"{item_path}.scam_cues_found", PUBLIC_SCAM_CUE_FIELDS)
+            for key in ("amenities", "image_urls", "landlord_reason_summary", "listing_confidence_notes",
+                        "score_explanation_lines", "source_names", "trust_caveats", "trust_strengths",
+                        "what_to_verify_before_applying"):
+                string_list_field(item, key, f"{item_path}.{key}")
+            history = list_field(item, "price_history", f"{item_path}.price_history")
+            if history is not None:
+                for history_index, point in enumerate(history):
+                    if (not isinstance(point, list) or len(point) != 2
+                            or not isinstance(point[0], str)
+                            or not isinstance(point[1], (int, float))
+                            or isinstance(point[1], bool)):
+                        problems.append(f"{item_path}.price_history[{history_index}] — must be [date string, rent number]")
 
     def walk(node: Any, path: str) -> None:
         if isinstance(node, dict):
@@ -734,37 +791,83 @@ def audit_public_payload(public: Any) -> list[str]:
         problems.append("$.origin is not 'cloud'")
     for key in ("pool", "shortlist", "manual_review"):
         listing_rows(public.get(key), f"$.{key}")
-    daily = public.get("daily_changes")
-    schema_keys(daily, "$.daily_changes", PUBLIC_DAILY_CHANGE_FIELDS)
-    if isinstance(daily, dict):
-        schema_keys(daily.get("counts"), "$.daily_changes.counts", PUBLIC_DAILY_COUNT_FIELDS)
+    daily = object_field(public, "daily_changes", "$.daily_changes", PUBLIC_DAILY_CHANGE_FIELDS)
+    if daily is not None:
+        object_field(daily, "counts", "$.daily_changes.counts", PUBLIC_DAILY_COUNT_FIELDS)
         for key in ("new_listings", "price_changes", "gone_listings"):
             listing_rows(daily.get(key), f"$.daily_changes.{key}")
-    schema_keys(public.get("app"), "$.app", PUBLIC_APP_FIELDS)
-    schema_keys(public.get("summary"), "$.summary", PUBLIC_SUMMARY_FIELDS)
-    schema_keys(public.get("source_health"), "$.source_health", PUBLIC_SOURCE_HEALTH_FIELDS)
-    schema_keys(public.get("run"), "$.run", PUBLIC_RUN_FIELDS)
-    schema_keys(public.get("vera"), "$.vera", PUBLIC_VERA_FIELDS)
-    skip = public.get("skip_insights")
-    schema_keys(skip, "$.skip_insights", frozenset({"total", "reasons"}))
-    if isinstance(skip, dict) and isinstance(skip.get("reasons"), list):
-        for index, reason in enumerate(skip["reasons"]):
-            schema_keys(reason, f"$.skip_insights.reasons[{index}]", frozenset({"code", "count", "label"}))
-    if isinstance(public.get("sources"), list):
-        for index, source in enumerate(public["sources"]):
+    object_field(public, "app", "$.app", PUBLIC_APP_FIELDS)
+    object_field(public, "summary", "$.summary", PUBLIC_SUMMARY_FIELDS)
+    object_field(public, "source_health", "$.source_health", PUBLIC_SOURCE_HEALTH_FIELDS)
+    object_field(public, "run", "$.run", PUBLIC_RUN_FIELDS)
+    object_field(public, "vera", "$.vera", PUBLIC_VERA_FIELDS)
+    skip = object_field(public, "skip_insights", "$.skip_insights", frozenset({"total", "reasons"}))
+    if skip is not None:
+        object_list_field(skip, "reasons", "$.skip_insights.reasons", frozenset({"code", "count", "label"}))
+    sources = list_field(public, "sources", "$.sources")
+    if sources is not None:
+        for index, source in enumerate(sources):
+            if not isinstance(source, dict):
+                problems.append(f"$.sources[{index}] — must be an object")
+                continue
             schema_keys(source, f"$.sources[{index}]", PUBLIC_SOURCE_FIELDS)
-    if isinstance(public.get("run_trends"), list):
-        for index, trend in enumerate(public["run_trends"]):
+    trends = list_field(public, "run_trends", "$.run_trends")
+    if trends is not None:
+        for index, trend in enumerate(trends):
+            if not isinstance(trend, dict):
+                problems.append(f"$.run_trends[{index}] — must be an object")
+                continue
             schema_keys(trend, f"$.run_trends[{index}]", PUBLIC_TREND_FIELDS)
-    if isinstance(public.get("stages"), dict):
-        for name, stage in public["stages"].items():
+    stages = object_field(public, "stages", "$.stages", PUBLIC_STAGE_NAMES)
+    if stages is not None:
+        for name, stage in stages.items():
             if name not in PUBLIC_STAGE_NAMES:
                 problems.append(f"$.stages.{name} — not in public schema")
+            if not isinstance(stage, dict):
+                problems.append(f"$.stages.{name} — must be an object")
+                continue
             schema_keys(stage, f"$.stages.{name}", PUBLIC_STAGE_FIELDS)
-    schema_keys(public.get("records_health"), "$.records_health", PUBLIC_RECORDS_HEALTH_FIELDS)
-    market_context = public.get("market_context")
-    schema_keys(market_context, "$.market_context", PUBLIC_MARKET_CONTEXT_FIELDS)
-    if isinstance(market_context, dict) and isinstance(market_context.get("series"), dict):
-        for name, series in market_context["series"].items():
-            schema_keys(series, f"$.market_context.series.{name}", PUBLIC_MARKET_SERIES_FIELDS)
+    object_field(public, "records_health", "$.records_health", PUBLIC_RECORDS_HEALTH_FIELDS)
+    market_context = object_field(public, "market_context", "$.market_context", PUBLIC_MARKET_CONTEXT_FIELDS)
+    if market_context is not None:
+        string_list_field(market_context, "months", "$.market_context.months")
+        series_rows = market_context.get("series")
+        if "series" in market_context and not isinstance(series_rows, dict):
+            problems.append("$.market_context.series — must be an object")
+        elif isinstance(series_rows, dict):
+            for name, series in series_rows.items():
+                if not isinstance(series, dict):
+                    problems.append(f"$.market_context.series.{name} — must be an object")
+                    continue
+                series_path = f"$.market_context.series.{name}"
+                schema_keys(series, series_path, PUBLIC_MARKET_SERIES_FIELDS)
+                rents = list_field(series, "median_asking_rent", f"{series_path}.median_asking_rent")
+                if rents is not None and any(
+                    value is not None and (not isinstance(value, (int, float)) or isinstance(value, bool))
+                    for value in rents
+                ):
+                    problems.append(f"{series_path}.median_asking_rent — must contain only numbers or null")
+    buckets = object_field(public, "state_buckets", "$.state_buckets", PUBLIC_STATE_BUCKET_FIELDS)
+    if buckets is not None:
+        for name, count in buckets.items():
+            if not (isinstance(count, int) and not isinstance(count, bool) and count >= 0):
+                problems.append(f"$.state_buckets.{name} — must be a non-negative count")
+    transit_tables = public.get("transit_tables")
+    if "transit_tables" in public:
+        if not isinstance(transit_tables, dict):
+            problems.append("$.transit_tables — must be an object")
+        else:
+            for route, stops in transit_tables.items():
+                route_path = f"$.transit_tables.{route}"
+                if not isinstance(route, str) or not route:
+                    problems.append(f"{route_path} — route name must be a non-empty string")
+                if not isinstance(stops, list):
+                    problems.append(f"{route_path} — must be an array")
+                    continue
+                for index, stop in enumerate(stops):
+                    if (not isinstance(stop, list) or len(stop) != 2
+                            or not isinstance(stop[0], str)
+                            or not isinstance(stop[1], (int, float))
+                            or isinstance(stop[1], bool) or stop[1] < 0):
+                        problems.append(f"{route_path}[{index}] — must be [station string, non-negative seconds]")
     return problems
