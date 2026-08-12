@@ -27,6 +27,7 @@ the finished publication before the publisher can write it.
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -131,6 +132,17 @@ PUBLIC_STATE_BUCKET_FIELDS = frozenset({
 # name, email, phone, or free-form value bypass the generic sensitive-key
 # guard.
 PUBLIC_AGGREGATE_FIELDS = frozenset({"contact_reuse_count"})
+
+PUBLIC_LISTING_STRING_LIST_FIELDS = frozenset({
+    "amenities", "image_urls", "landlord_reason_summary",
+    "listing_confidence_notes", "score_explanation_lines", "source_names",
+    "trust_caveats", "trust_strengths", "what_to_verify_before_applying",
+})
+PUBLIC_LISTING_CONTAINER_FIELDS = frozenset({
+    "change_detail", "component_scores", "illegal_demands",
+    "landlord_portfolio", "price_history", "scam_cues_found", "transit",
+}) | PUBLIC_LISTING_STRING_LIST_FIELDS
+PUBLIC_LISTING_SCALAR_FIELDS = PUBLIC_LISTING_FIELDS - PUBLIC_LISTING_CONTAINER_FIELDS
 
 # Existing direct fields remain explicitly denied even if a future schema edit
 # accidentally adds one. These are owner-only inspection/runtime details, not
@@ -244,7 +256,7 @@ def _listing_value(key: str, value: Any) -> Any:
         return _object_list(value, PUBLIC_SCAM_CUE_FIELDS)
     if key == "price_history":
         return _price_history(value)
-    if key in {"amenities", "image_urls", "landlord_reason_summary", "listing_confidence_notes", "score_explanation_lines", "source_names", "trust_caveats", "trust_strengths", "what_to_verify_before_applying"}:
+    if key in PUBLIC_LISTING_STRING_LIST_FIELDS:
         return _string_list(value)
     return _scalar(value)
 
@@ -679,9 +691,51 @@ def audit_public_payload(public: Any) -> list[str]:
     cloud publisher refuses to commit when this returns anything.
     """
     problems: list[str] = []
+    missing = object()
+
+    def is_json_scalar(value: Any) -> bool:
+        if isinstance(value, bool):
+            return True
+        if isinstance(value, int):
+            return True
+        if isinstance(value, float):
+            return math.isfinite(value)
+        return isinstance(value, str)
+
+    def scalar_matches(value: Any, expected: str) -> bool:
+        if expected == "string":
+            return isinstance(value, str)
+        if expected == "boolean":
+            return isinstance(value, bool)
+        if expected == "number":
+            return (isinstance(value, (int, float)) and not isinstance(value, bool)
+                    and (not isinstance(value, float) or math.isfinite(value)))
+        if expected == "integer":
+            return isinstance(value, int) and not isinstance(value, bool)
+        if expected == "count":
+            return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        raise ValueError(f"unknown public scalar type: {expected}")
+
+    def scalar_fields(node: dict[str, Any], path: str, fields: frozenset[str],
+                      expected: dict[str, str] | None = None) -> None:
+        typed = expected or {}
+        for key in fields:
+            if key not in node:
+                continue
+            value = node[key]
+            field_path = f"{path}.{key}"
+            if not is_json_scalar(value):
+                problems.append(f"{field_path} — must be a finite JSON scalar")
+                continue
+            kind = typed.get(key)
+            if kind and not scalar_matches(value, kind):
+                problems.append(f"{field_path} — must be a {kind}")
 
     def schema_keys(node: Any, path: str, allowed: frozenset[str]) -> None:
         for key in node:
+            if not isinstance(key, str):
+                problems.append(f"{path} — object key {key!r} is not a string")
+                continue
             if key not in allowed:
                 problems.append(f"{path}.{key} — not in public schema")
 
@@ -711,7 +765,8 @@ def audit_public_payload(public: Any) -> list[str]:
             problems.append(f"{path} — must contain only strings")
 
     def object_list_field(parent: dict[str, Any], key: str, path: str,
-                          allowed: frozenset[str]) -> None:
+                          allowed: frozenset[str],
+                          expected: dict[str, str] | None = None) -> None:
         values = list_field(parent, key, path)
         if values is None:
             return
@@ -719,10 +774,12 @@ def audit_public_payload(public: Any) -> list[str]:
             if not isinstance(value, dict):
                 problems.append(f"{path}[{index}] — must be an object")
                 continue
-            schema_keys(value, f"{path}[{index}]", allowed)
+            item_path = f"{path}[{index}]"
+            schema_keys(value, item_path, allowed)
+            scalar_fields(value, item_path, allowed, expected)
 
     def listing_rows(node: Any, path: str) -> None:
-        if node is None:
+        if node is missing:
             return
         if not isinstance(node, list):
             problems.append(f"{path} — must be an array")
@@ -733,23 +790,61 @@ def audit_public_payload(public: Any) -> list[str]:
                 problems.append(f"{item_path} — must be an object")
                 continue
             schema_keys(item, item_path, PUBLIC_LISTING_FIELDS)
-            object_field(item, "component_scores", f"{item_path}.component_scores", PUBLIC_COMPONENT_SCORE_FIELDS)
+            scalar_fields(item, item_path, PUBLIC_LISTING_SCALAR_FIELDS, {
+                "contact_reuse_count": "count",
+                "latitude": "number", "longitude": "number", "rent": "number",
+                "source_name": "string",
+            })
+            component_scores = object_field(
+                item, "component_scores", f"{item_path}.component_scores",
+                PUBLIC_COMPONENT_SCORE_FIELDS,
+            )
+            if component_scores is not None:
+                scalar_fields(
+                    component_scores, f"{item_path}.component_scores",
+                    PUBLIC_COMPONENT_SCORE_FIELDS,
+                    {key: "number" for key in PUBLIC_COMPONENT_SCORE_FIELDS},
+                )
             portfolio = object_field(item, "landlord_portfolio", f"{item_path}.landlord_portfolio", PUBLIC_PORTFOLIO_FIELDS)
             if portfolio is not None:
+                scalar_fields(
+                    portfolio, f"{item_path}.landlord_portfolio",
+                    PUBLIC_PORTFOLIO_FIELDS - {"topowners"},
+                    {
+                        key: ("string" if key == "topcorp" else "number")
+                        for key in PUBLIC_PORTFOLIO_FIELDS - {"topowners"}
+                    },
+                )
                 string_list_field(portfolio, "topowners", f"{item_path}.landlord_portfolio.topowners")
             transit = object_field(item, "transit", f"{item_path}.transit", PUBLIC_TRANSIT_FIELDS)
             if transit is not None:
+                scalar_fields(
+                    transit, f"{item_path}.transit",
+                    PUBLIC_TRANSIT_FIELDS - {"lines"},
+                    {"station": "string", "walk_mins": "number"},
+                )
                 string_list_field(transit, "lines", f"{item_path}.transit.lines")
-            object_field(item, "change_detail", f"{item_path}.change_detail", PUBLIC_CHANGE_DETAIL_FIELDS)
-            if "contact_reuse_count" in item:
-                count = item["contact_reuse_count"]
-                if not (isinstance(count, (int, float)) and not isinstance(count, bool) and count >= 0):
-                    problems.append(f"{item_path}.contact_reuse_count — not a non-negative public aggregate")
-            object_list_field(item, "illegal_demands", f"{item_path}.illegal_demands", PUBLIC_ILLEGAL_DEMAND_FIELDS)
-            object_list_field(item, "scam_cues_found", f"{item_path}.scam_cues_found", PUBLIC_SCAM_CUE_FIELDS)
-            for key in ("amenities", "image_urls", "landlord_reason_summary", "listing_confidence_notes",
-                        "score_explanation_lines", "source_names", "trust_caveats", "trust_strengths",
-                        "what_to_verify_before_applying"):
+            change_detail = object_field(item, "change_detail", f"{item_path}.change_detail", PUBLIC_CHANGE_DETAIL_FIELDS)
+            if change_detail is not None:
+                scalar_fields(
+                    change_detail, f"{item_path}.change_detail",
+                    PUBLIC_CHANGE_DETAIL_FIELDS,
+                    {
+                        key: ("number" if key in {"last_rent", "price_change", "rent"} else "string")
+                        for key in PUBLIC_CHANGE_DETAIL_FIELDS
+                    },
+                )
+            object_list_field(
+                item, "illegal_demands", f"{item_path}.illegal_demands",
+                PUBLIC_ILLEGAL_DEMAND_FIELDS,
+                {key: "string" for key in PUBLIC_ILLEGAL_DEMAND_FIELDS},
+            )
+            object_list_field(
+                item, "scam_cues_found", f"{item_path}.scam_cues_found",
+                PUBLIC_SCAM_CUE_FIELDS,
+                {key: "string" for key in PUBLIC_SCAM_CUE_FIELDS},
+            )
+            for key in PUBLIC_LISTING_STRING_LIST_FIELDS:
                 string_list_field(item, key, f"{item_path}.{key}")
             history = list_field(item, "price_history", f"{item_path}.price_history")
             if history is not None:
@@ -757,14 +852,17 @@ def audit_public_payload(public: Any) -> list[str]:
                     if (not isinstance(point, list) or len(point) != 2
                             or not isinstance(point[0], str)
                             or not isinstance(point[1], (int, float))
-                            or isinstance(point[1], bool)):
+                            or isinstance(point[1], bool)
+                            or (isinstance(point[1], float) and not math.isfinite(point[1]))):
                         problems.append(f"{item_path}.price_history[{history_index}] — must be [date string, rent number]")
 
     def walk(node: Any, path: str) -> None:
         if isinstance(node, dict):
             for k, v in node.items():
-                if (k not in PUBLIC_AGGREGATE_FIELDS
-                        and (k in PERSONAL_FIELDS or SENSITIVE_KEY_PATTERN.search(k))):
+                if not isinstance(k, str):
+                    problems.append(f"{path} — object key {k!r} is not a string")
+                elif (k not in PUBLIC_AGGREGATE_FIELDS
+                      and (k in PERSONAL_FIELDS or SENSITIVE_KEY_PATTERN.search(k))):
                     problems.append(f"{path}.{k} — sensitive key")
                 walk(v, f"{path}.{k}")
         elif isinstance(node, list):
@@ -779,45 +877,98 @@ def audit_public_payload(public: Any) -> list[str]:
                 problems.append(f"{path} — phone-like value")
             if LOCAL_PATH_PATTERN.search(node):
                 problems.append(f"{path} — local filesystem path")
+        elif isinstance(node, float) and not math.isfinite(node):
+            problems.append(f"{path} — non-finite number is not valid JSON")
+        elif node is not None and not isinstance(node, (bool, int, float)):
+            problems.append(f"{path} — value is not JSON-compatible")
 
     walk(public, "$")
     if not isinstance(public, dict):
         problems.append("$ — public payload is not an object")
         return problems
     schema_keys(public, "$", PUBLIC_TOP_LEVEL_FIELDS)
+    scalar_fields(
+        public, "$", frozenset({"generated_at", "lens", "origin"}),
+        {"generated_at": "string", "lens": "string", "origin": "string"},
+    )
     if public.get("lens") != "public":
         problems.append("$.lens is not 'public'")
     if "origin" in public and public["origin"] != "cloud":
         problems.append("$.origin is not 'cloud'")
     for key in ("pool", "shortlist", "manual_review"):
-        listing_rows(public.get(key), f"$.{key}")
+        listing_rows(public.get(key, missing), f"$.{key}")
     daily = object_field(public, "daily_changes", "$.daily_changes", PUBLIC_DAILY_CHANGE_FIELDS)
     if daily is not None:
-        object_field(daily, "counts", "$.daily_changes.counts", PUBLIC_DAILY_COUNT_FIELDS)
+        scalar_fields(
+            daily, "$.daily_changes",
+            PUBLIC_DAILY_CHANGE_FIELDS - {"counts", "new_listings", "price_changes", "gone_listings"},
+            {key: "string" for key in PUBLIC_DAILY_CHANGE_FIELDS - {"counts", "new_listings", "price_changes", "gone_listings"}},
+        )
+        daily_counts = object_field(daily, "counts", "$.daily_changes.counts", PUBLIC_DAILY_COUNT_FIELDS)
+        if daily_counts is not None:
+            scalar_fields(
+                daily_counts, "$.daily_changes.counts", PUBLIC_DAILY_COUNT_FIELDS,
+                {key: "count" for key in PUBLIC_DAILY_COUNT_FIELDS},
+            )
         for key in ("new_listings", "price_changes", "gone_listings"):
-            listing_rows(daily.get(key), f"$.daily_changes.{key}")
-    object_field(public, "app", "$.app", PUBLIC_APP_FIELDS)
-    object_field(public, "summary", "$.summary", PUBLIC_SUMMARY_FIELDS)
-    object_field(public, "source_health", "$.source_health", PUBLIC_SOURCE_HEALTH_FIELDS)
-    object_field(public, "run", "$.run", PUBLIC_RUN_FIELDS)
-    object_field(public, "vera", "$.vera", PUBLIC_VERA_FIELDS)
+            listing_rows(daily.get(key, missing), f"$.daily_changes.{key}")
+    app = object_field(public, "app", "$.app", PUBLIC_APP_FIELDS)
+    if app is not None:
+        scalar_fields(app, "$.app", PUBLIC_APP_FIELDS, {key: "string" for key in PUBLIC_APP_FIELDS})
+    summary = object_field(public, "summary", "$.summary", PUBLIC_SUMMARY_FIELDS)
+    if summary is not None:
+        scalar_fields(
+            summary, "$.summary", PUBLIC_SUMMARY_FIELDS,
+            {key: ("string" if key == "hero_summary" else "count") for key in PUBLIC_SUMMARY_FIELDS},
+        )
+    source_health = object_field(public, "source_health", "$.source_health", PUBLIC_SOURCE_HEALTH_FIELDS)
+    if source_health is not None:
+        scalar_fields(
+            source_health, "$.source_health", PUBLIC_SOURCE_HEALTH_FIELDS,
+            {key: "count" for key in PUBLIC_SOURCE_HEALTH_FIELDS},
+        )
+    run = object_field(public, "run", "$.run", PUBLIC_RUN_FIELDS)
+    if run is not None:
+        scalar_fields(run, "$.run", PUBLIC_RUN_FIELDS, {key: "string" for key in PUBLIC_RUN_FIELDS})
+    vera = object_field(public, "vera", "$.vera", PUBLIC_VERA_FIELDS)
+    if vera is not None:
+        scalar_fields(vera, "$.vera", PUBLIC_VERA_FIELDS, {key: "string" for key in PUBLIC_VERA_FIELDS})
     skip = object_field(public, "skip_insights", "$.skip_insights", frozenset({"total", "reasons"}))
     if skip is not None:
-        object_list_field(skip, "reasons", "$.skip_insights.reasons", frozenset({"code", "count", "label"}))
+        scalar_fields(skip, "$.skip_insights", frozenset({"total"}), {"total": "count"})
+        object_list_field(
+            skip, "reasons", "$.skip_insights.reasons",
+            frozenset({"code", "count", "label"}),
+            {"code": "string", "count": "count", "label": "string"},
+        )
     sources = list_field(public, "sources", "$.sources")
     if sources is not None:
         for index, source in enumerate(sources):
             if not isinstance(source, dict):
                 problems.append(f"$.sources[{index}] — must be an object")
                 continue
-            schema_keys(source, f"$.sources[{index}]", PUBLIC_SOURCE_FIELDS)
+            source_path = f"$.sources[{index}]"
+            schema_keys(source, source_path, PUBLIC_SOURCE_FIELDS)
+            scalar_fields(source, source_path, PUBLIC_SOURCE_FIELDS, {
+                "enabled": "boolean", "last_success_at": "string",
+                "listing_yield": "count", "reason": "string",
+                "record_count": "count", "reliability_score": "number",
+                "source_name": "string", "status": "string", "tier": "string",
+            })
     trends = list_field(public, "run_trends", "$.run_trends")
     if trends is not None:
         for index, trend in enumerate(trends):
             if not isinstance(trend, dict):
                 problems.append(f"$.run_trends[{index}] — must be an object")
                 continue
-            schema_keys(trend, f"$.run_trends[{index}]", PUBLIC_TREND_FIELDS)
+            trend_path = f"$.run_trends[{index}]"
+            schema_keys(trend, trend_path, PUBLIC_TREND_FIELDS)
+            scalar_fields(trend, trend_path, PUBLIC_TREND_FIELDS, {
+                "active_sources": "count", "avg_reliability": "number",
+                "healthy_sources": "count", "pipeline_status": "string",
+                "records_discovered": "count", "records_published": "count",
+                "run_id": "string", "timestamp": "string",
+            })
     stages = object_field(public, "stages", "$.stages", PUBLIC_STAGE_NAMES)
     if stages is not None:
         for name, stage in stages.items():
@@ -826,8 +977,18 @@ def audit_public_payload(public: Any) -> list[str]:
             if not isinstance(stage, dict):
                 problems.append(f"$.stages.{name} — must be an object")
                 continue
-            schema_keys(stage, f"$.stages.{name}", PUBLIC_STAGE_FIELDS)
-    object_field(public, "records_health", "$.records_health", PUBLIC_RECORDS_HEALTH_FIELDS)
+            stage_path = f"$.stages.{name}"
+            schema_keys(stage, stage_path, PUBLIC_STAGE_FIELDS)
+            scalar_fields(stage, stage_path, PUBLIC_STAGE_FIELDS, {
+                "finished_at": "string", "records_in": "count",
+                "records_out": "count", "started_at": "string", "status": "string",
+            })
+    records_health = object_field(public, "records_health", "$.records_health", PUBLIC_RECORDS_HEALTH_FIELDS)
+    if records_health is not None:
+        scalar_fields(records_health, "$.records_health", PUBLIC_RECORDS_HEALTH_FIELDS, {
+            "attempted": "count", "degraded": "boolean", "errors": "count",
+            "matched": "count", "skipped": "count", "total": "count",
+        })
     market_context = object_field(public, "market_context", "$.market_context", PUBLIC_MARKET_CONTEXT_FIELDS)
     if market_context is not None:
         string_list_field(market_context, "months", "$.market_context.months")
@@ -841,6 +1002,14 @@ def audit_public_payload(public: Any) -> list[str]:
                     continue
                 series_path = f"$.market_context.series.{name}"
                 schema_keys(series, series_path, PUBLIC_MARKET_SERIES_FIELDS)
+                scalar_fields(
+                    series, series_path,
+                    PUBLIC_MARKET_SERIES_FIELDS - {"median_asking_rent"},
+                    {
+                        "area_type": "string", "median_asking_rent_latest": "number",
+                        "rental_inventory_latest": "number",
+                    },
+                )
                 rents = list_field(series, "median_asking_rent", f"{series_path}.median_asking_rent")
                 if rents is not None and any(
                     value is not None and (not isinstance(value, (int, float)) or isinstance(value, bool))
@@ -868,6 +1037,8 @@ def audit_public_payload(public: Any) -> list[str]:
                     if (not isinstance(stop, list) or len(stop) != 2
                             or not isinstance(stop[0], str)
                             or not isinstance(stop[1], (int, float))
-                            or isinstance(stop[1], bool) or stop[1] < 0):
+                            or isinstance(stop[1], bool)
+                            or (isinstance(stop[1], float) and not math.isfinite(stop[1]))
+                            or stop[1] < 0):
                         problems.append(f"{route_path}[{index}] — must be [station string, non-negative seconds]")
     return problems

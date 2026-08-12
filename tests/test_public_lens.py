@@ -208,6 +208,16 @@ def test_audit_fails_closed_for_malformed_public_containers() -> None:
     malformed_pool["pool"] = {"not": "an array"}
     check("a non-array pool fails", any("$.pool — must be an array" in p for p in PL.audit_public_payload(malformed_pool)))
 
+    null_pool = json.loads(json.dumps(clean))
+    null_pool["pool"] = None
+    check("a present null pool fails", any("$.pool — must be an array" in p for p in PL.audit_public_payload(null_pool)))
+
+    null_daily_rows = json.loads(json.dumps(clean))
+    null_daily_rows["daily_changes"] = {"new_listings": None}
+    check("a present null daily listing array fails",
+          any("$.daily_changes.new_listings — must be an array" in p
+              for p in PL.audit_public_payload(null_daily_rows)))
+
     malformed_buckets = json.loads(json.dumps(clean))
     malformed_buckets["state_buckets"] = {"invented_bucket": 1, "shortlisted": "one"}
     bucket_problems = PL.audit_public_payload(malformed_buckets)
@@ -232,6 +242,48 @@ def test_audit_fails_closed_for_malformed_public_containers() -> None:
     check("malformed market-series containers fail",
           any("market_context.series.all_nyc.median_asking_rent — must be an array" in p
               for p in PL.audit_public_payload(malformed_market)))
+
+    scalar_slots = json.loads(json.dumps(clean))
+    scalar_slots["generated_at"] = {"hidden": "value"}
+    scalar_slots["pool"][0]["rent"] = [2200]
+    scalar_slots["sources"] = [{"source_name": {"hidden": "value"}, "record_count": 1}]
+    scalar_problems = PL.audit_public_payload(scalar_slots)
+    check("containers cannot hide in top-level or nested scalar slots",
+          any("$.generated_at — must be a finite JSON scalar" in p for p in scalar_problems)
+          and any("$.pool[0].rent — must be a finite JSON scalar" in p for p in scalar_problems)
+          and any("$.sources[0].source_name — must be a finite JSON scalar" in p for p in scalar_problems),
+          str(scalar_problems))
+
+    wrong_scalar_types = json.loads(json.dumps(clean))
+    wrong_scalar_types["generated_at"] = 123
+    wrong_scalar_types["pool"][0]["rent"] = "2200"
+    wrong_scalar_types["sources"] = [{"source_name": 42, "record_count": 1}]
+    wrong_type_problems = PL.audit_public_payload(wrong_scalar_types)
+    check("typed scalar contracts reject the wrong primitive type",
+          any("$.generated_at — must be a string" in p for p in wrong_type_problems)
+          and any("$.pool[0].rent — must be a number" in p for p in wrong_type_problems)
+          and any("$.sources[0].source_name — must be a string" in p for p in wrong_type_problems),
+          str(wrong_type_problems))
+
+    unguarded_listing_fields = []
+    for field in PL.PUBLIC_LISTING_SCALAR_FIELDS:
+        probe = json.loads(json.dumps(clean))
+        probe["pool"][0][field] = {"hidden": "value"}
+        if not any(f"$.pool[0].{field} — must be a finite JSON scalar" in p
+                   for p in PL.audit_public_payload(probe)):
+            unguarded_listing_fields.append(field)
+    check("every listing scalar slot rejects containers",
+          not unguarded_listing_fields, str(sorted(unguarded_listing_fields)))
+
+    non_finite = json.loads(json.dumps(clean))
+    non_finite["pool"][0]["rent"] = float("nan")
+    check("non-finite numbers fail",
+          any("$.pool[0].rent" in p and ("finite" in p or "valid JSON" in p)
+              for p in PL.audit_public_payload(non_finite)))
+
+    absent_optional = {"lens": "public", "generated_at": "x"}
+    check("genuinely absent optional containers remain valid",
+          PL.audit_public_payload(absent_optional) == [])
 
 
 def test_public_schema_is_complete_and_private_by_default() -> None:
