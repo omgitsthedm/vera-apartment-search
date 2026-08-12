@@ -3,8 +3,8 @@
 
 This is intentionally a monitor, not a publisher: it makes one GET request
 to the Little Fight NYC first-party metadata route and exits non-zero when
-the public contract is unavailable, invalid, empty, not cloud-produced, or
-older than the documented freshness window.
+the public contract is unavailable, invalid, empty, not cloud-produced from
+the latest snapshot, or older than the documented freshness window.
 """
 from __future__ import annotations
 
@@ -38,6 +38,8 @@ def validate_meta(meta: Any, now: datetime | None = None) -> list[str]:
     problems: list[str] = []
     if meta.get("origin") != "cloud":
         problems.append("metadata origin is not 'cloud'")
+    if meta.get("snapshot_source") != "latest":
+        problems.append("metadata snapshot_source is not 'latest'")
 
     pool = meta.get("pool")
     if not isinstance(pool, int) or isinstance(pool, bool) or pool <= 0:

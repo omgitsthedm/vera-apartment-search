@@ -24,7 +24,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def meta(**overrides):
-    value = {"origin": "cloud", "pool": 1, "generated_at": (NOW - timedelta(hours=1)).isoformat()}
+    value = {"origin": "cloud", "snapshot_source": "latest", "pool": 1, "generated_at": (NOW - timedelta(hours=1)).isoformat()}
     value.update(overrides)
     return value
 
@@ -33,6 +33,11 @@ def main() -> int:
     print("\nfirst-party feed health contract:")
     check("a recent non-empty cloud feed passes", HEALTH.validate_meta(meta(), NOW) == [])
     check("origin must be cloud", any("origin" in item for item in HEALTH.validate_meta(meta(origin="local"), NOW)))
+    check("latest snapshot source passes", HEALTH.validate_meta(meta(snapshot_source="latest"), NOW) == [])
+    check("fallback snapshot sources fail", all(
+        any("snapshot_source" in item for item in HEALTH.validate_meta(meta(snapshot_source=source), NOW))
+        for source in ("last_known_good", None)
+    ))
     check("empty pools fail closed", any("pool" in item for item in HEALTH.validate_meta(meta(pool=0), NOW)))
     check("invalid JSON metadata timestamps fail closed", any("generated_at" in item for item in HEALTH.validate_meta(meta(generated_at="not-a-time"), NOW)))
     check("a feed older than 36 hours fails closed", any("36-hour" in item for item in HEALTH.validate_meta(meta(generated_at=(NOW - timedelta(hours=36, seconds=1)).isoformat()), NOW)))
