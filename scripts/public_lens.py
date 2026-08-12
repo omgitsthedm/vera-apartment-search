@@ -122,6 +122,12 @@ PUBLIC_DAILY_COUNT_FIELDS = frozenset({"back", "gone", "new", "price_drop", "pri
 PUBLIC_MARKET_CONTEXT_FIELDS = frozenset({"months", "series"})
 PUBLIC_MARKET_SERIES_FIELDS = frozenset({"area_type", "median_asking_rent", "median_asking_rent_latest", "rental_inventory_latest"})
 
+# A count is a public aggregate, not a contact channel. Keep this exception
+# narrow and type-checked: spelling it like a contact field must not let a
+# name, email, phone, or free-form value bypass the generic sensitive-key
+# guard.
+PUBLIC_AGGREGATE_FIELDS = frozenset({"contact_reuse_count"})
+
 # Existing direct fields remain explicitly denied even if a future schema edit
 # accidentally adds one. These are owner-only inspection/runtime details, not
 # browser UI input.
@@ -212,6 +218,8 @@ def _price_history(value: Any) -> list[list[Any]]:
 
 
 def _listing_value(key: str, value: Any) -> Any:
+    if key == "contact_reuse_count":
+        return value if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 else None
     if key == "component_scores":
         return _object(value, PUBLIC_COMPONENT_SCORE_FIELDS)
     if key == "landlord_portfolio":
@@ -685,6 +693,10 @@ def audit_public_payload(public: Any) -> list[str]:
             schema_keys(item.get("landlord_portfolio"), f"{item_path}.landlord_portfolio", PUBLIC_PORTFOLIO_FIELDS)
             schema_keys(item.get("transit"), f"{item_path}.transit", PUBLIC_TRANSIT_FIELDS)
             schema_keys(item.get("change_detail"), f"{item_path}.change_detail", PUBLIC_CHANGE_DETAIL_FIELDS)
+            if "contact_reuse_count" in item:
+                count = item["contact_reuse_count"]
+                if not (isinstance(count, (int, float)) and not isinstance(count, bool) and count >= 0):
+                    problems.append(f"{item_path}.contact_reuse_count — not a non-negative public aggregate")
             for key, fields in (("illegal_demands", PUBLIC_ILLEGAL_DEMAND_FIELDS),
                                 ("scam_cues_found", PUBLIC_SCAM_CUE_FIELDS)):
                 if isinstance(item.get(key), list):
@@ -694,7 +706,8 @@ def audit_public_payload(public: Any) -> list[str]:
     def walk(node: Any, path: str) -> None:
         if isinstance(node, dict):
             for k, v in node.items():
-                if k in PERSONAL_FIELDS or SENSITIVE_KEY_PATTERN.search(k):
+                if (k not in PUBLIC_AGGREGATE_FIELDS
+                        and (k in PERSONAL_FIELDS or SENSITIVE_KEY_PATTERN.search(k))):
                     problems.append(f"{path}.{k} — sensitive key")
                 walk(v, f"{path}.{k}")
         elif isinstance(node, list):

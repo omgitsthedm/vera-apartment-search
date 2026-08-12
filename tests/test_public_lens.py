@@ -217,6 +217,11 @@ def test_public_schema_is_complete_and_private_by_default() -> None:
     check("malformed nested value shapes are absent", entry.get("price_history") == [["2026-08-01", 2200]])
     check("clean projection passes the independent audit", PL.audit_public_payload(pub) == [])
 
+    aggregate = json.loads(json.dumps(pub))
+    aggregate["pool"][0]["contact_reuse_count"] = 3
+    check("the approved contact-reuse aggregate audits clean",
+          PL.audit_public_payload(aggregate) == [])
+
     injected = json.loads(json.dumps(pub))
     injected["pool"][0]["alternate_contact_channel"] = "owner@example.com"
     injected["pool"][0]["component_scores"]["future_metric"] = 9
@@ -228,6 +233,11 @@ def test_public_schema_is_complete_and_private_by_default() -> None:
           and any("phone-like value" in p for p in problems), str(problems))
     check("nested unknown keys are rejected",
           any("component_scores.future_metric" in p for p in problems), str(problems))
+
+    personal_contact = json.loads(json.dumps(aggregate))
+    personal_contact["pool"][0]["contact_email"] = "owner@example.com"
+    check("contact-like personal keys still fail",
+          any("contact_email" in p for p in PL.audit_public_payload(personal_contact)))
 
 
 def test_audit_scans_every_listing_not_only_the_first_400() -> None:
