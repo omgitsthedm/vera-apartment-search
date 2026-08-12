@@ -240,7 +240,7 @@ def _listing_value(key: str, value: Any) -> Any:
         return _object_list(value, PUBLIC_SCAM_CUE_FIELDS)
     if key == "price_history":
         return _price_history(value)
-    if key in {"amenities", "image_urls", "listing_confidence_notes", "score_explanation_lines", "source_names", "trust_caveats", "trust_strengths", "what_to_verify_before_applying"}:
+    if key in {"amenities", "image_urls", "landlord_reason_summary", "listing_confidence_notes", "score_explanation_lines", "source_names", "trust_caveats", "trust_strengths", "what_to_verify_before_applying"}:
         return _string_list(value)
     return _scalar(value)
 

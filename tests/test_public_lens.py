@@ -199,6 +199,7 @@ def test_public_schema_is_complete_and_private_by_default() -> None:
         unusual_safe_new_field="do not publish this yet",
         component_scores={"search_fit": 8, "private_token": "not public"},
         landlord_portfolio={"bldgs": 2, "contact_name": "Maria Ortega"},
+        landlord_reason_summary=["Public landlord record match"],
         transit={"station": "Lorimer St", "lines": ["L", "G"], "phone": "917-555-0142"},
         price_history=[["2026-08-01", 2200], ["not-a-date-only"], {"rent": 2200}],
     )
@@ -207,7 +208,9 @@ def test_public_schema_is_complete_and_private_by_default() -> None:
         extras={"pool": [source]},
     )
     entry = pub["pool"][0]
-    check("legitimate UI fields remain", entry.get("listing_uid") == "u1" and entry.get("rent") == 2200)
+    check("legitimate UI fields remain",
+          entry.get("listing_uid") == "u1" and entry.get("rent") == 2200
+          and entry.get("landlord_reason_summary") == ["Public landlord record match"])
     check("alternate sensitive names are absent",
           "owner_email" not in entry and "unusual_safe_new_field" not in entry)
     check("nested objects are projected too",
