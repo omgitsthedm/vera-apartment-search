@@ -82,6 +82,8 @@ All four were loaded, idle at inspection time, and reported last exit code `0`. 
 
 GitHub Actions schedules `sanctioned-cloud-sweep.yml` for 05:30 UTC daily. GitHub may queue the job after that trigger time. Manual dispatch is a production publication action and requires current authorization.
 
+`public-feed-health.yml` is a separate read-only monitor scheduled for 07:00 UTC daily and available through manual dispatch. It performs one GET of the first-party `https://littlefightnyc.com/vera/data/meta.json` route and fails closed if the response is unavailable or invalid, `origin` is not `cloud`, `pool` is empty, or `generated_at` is older than 36 hours. The 90-minute offset follows the expected 05:30 UTC cloud-sweep slot; it allows for the normal sweep duration but does not make GitHub's scheduler punctual. It has read-only repository permission, no secrets, no notifications, and never runs discovery or publishes data.
+
 ## Validation commands
 
 Run the engine's isolated checks without reading private runtime data:
