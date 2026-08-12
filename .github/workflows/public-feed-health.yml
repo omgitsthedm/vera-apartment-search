@@ -1,0 +1,25 @@
+# Read-only monitor for the public VERA feed. It does not run discovery,
+# publish data, send notifications, or use secrets.
+name: public-feed-health
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # The cloud sweep is scheduled for 05:30 UTC. This 07:00 UTC check allows
+    # 90 minutes for its expected run and publishes no data of its own.
+    - cron: "0 7 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-first-party-feed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check first-party public metadata
+        run: python3 scripts/check_public_feed_health.py

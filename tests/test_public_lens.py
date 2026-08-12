@@ -7,9 +7,8 @@ and the cloud sweep publishes with it unattended, to a public URL, with no
 human between the run and the world.
 
 Every leak found in this system so far arrived the same way: a new section
-was added and nobody remembered to sanitize it. So these tests do not just
-check the sections that exist today. They add sections that did not exist
-when the lens was written, and require the lens to strip them anyway.
+was added and nobody remembered to treat it as private. These tests verify
+the stronger rule: a field is absent unless the public schema admits it.
 """
 from __future__ import annotations
 
@@ -87,25 +86,28 @@ def test_a_section_nobody_sanitized() -> None:
     hunt = {
         "generated_at": "2026-08-04T00:00:00+00:00",
         "shortlist": [],
-        # None of these keys exist in the lens. They must still be cleaned.
+        # Neither section exists in the public schema.
         "landlord_outreach_v3": {"queue": [{"unit": "3R", **PERSONAL}]},
         "deeply": {"nested": [{"under": {"several": {"levels": PERSONAL}}}]},
     }
     pub = PL.build_public_payload(hunt)
     blob = json.dumps(pub)
-    check("an unknown top-level section is still stripped",
+    check("an unknown top-level section is stripped",
           "contact_phone" not in blob and "917-555-0142" not in blob)
-    check("stripping reaches arbitrary depth",
+    check("unknown data at arbitrary depth is stripped",
           "analyst_notes" not in blob and "she sounded motivated" not in blob)
-    check("the section itself survives — this strips fields, not features",
-          "landlord_outreach_v3" in pub and pub["landlord_outreach_v3"]["queue"][0]["unit"] == "3R")
+    check("the unknown section itself is private by default",
+          "landlord_outreach_v3" not in pub and "deeply" not in pub)
 
 
 def test_watchlist_accusations_are_neutralized() -> None:
     print("\nowner accusations vs public record:")
     hunt = {
         "generated_at": "2026-08-04T00:00:00+00:00",
-        "shortlist": [listing(risk_note="Owner is a known scammer", hpd_open_violations=19)],
+        "shortlist": [listing(
+            trust_caveats=["Owner is a known scammer"],
+            hpd_open_violations=19,
+        )],
         "risk_watch": ["matched the bad-actor list"],
         "messages": ["blacklist hit on this BBL"],
     }
@@ -126,7 +128,7 @@ def test_owner_only_and_watchlist_sections() -> None:
                     review_out_reason="too far", raw_snapshot_path="/Users/davidmarsh/x.json")]
     pub = PL.build_public_payload(hunt, extras={
         "pool": pool,
-        "state_buckets": {"pursue": [listing()], "skip": [listing(), listing()]},
+        "state_buckets": {"shortlisted": [listing()], "filtered_out": [listing(), listing()], "other": [listing()]},
     })
     check("the manual watchlist section is dropped", "watchlist" not in pub)
     got = set(pub["pool"][0].keys())
@@ -134,7 +136,7 @@ def test_owner_only_and_watchlist_sections() -> None:
           not (got & PL.PUBLIC_DROP_FIELDS), str(sorted(got & PL.PUBLIC_DROP_FIELDS)))
     check("no local filesystem path ships", "davidmarsh" not in json.dumps(pub))
     check("state_buckets publishes counts, not a second copy of every record",
-          pub["state_buckets"] == {"pursue": 1, "skip": 2}, str(pub["state_buckets"]))
+          pub["state_buckets"] == {"shortlisted": 1, "filtered_out": 2}, str(pub["state_buckets"]))
     check("the payload is labelled as the public lens", pub.get("lens") == "public")
 
 
@@ -145,15 +147,22 @@ def test_archive_cannot_outrun_the_feed() -> None:
         extras={"pool": [listing()]},
     )
     with tempfile.TemporaryDirectory() as d:
+        Path(d, "archive.json").write_text(json.dumps([{
+            "date": "2026-08-03",
+            "run_id": "old-run",
+            "listings": [{"listing_uid": "old", "contact_phone": "917-555-0142"}],
+            "private_note": "must not survive a re-publish",
+        }]))
         stat = PL.maintain_archive(pub, d)
         text = (Path(d) / "archive.json").read_text()
         check("today's full-fit listing is archived", stat["archived"] == 1, str(stat))
-        check("the archive carries no personal field",
-              not any(f in text for f in PL.PERSONAL_FIELDS))
+        check("the archive carries no personal field, including prior entries",
+              not any(f in text for f in PL.PERSONAL_FIELDS) and "private_note" not in text)
         # re-publishing the same day must replace, not stack
         PL.maintain_archive(pub, d)
         again = json.loads((Path(d) / "archive.json").read_text())
-        check("a re-publish replaces the day rather than duplicating it", len(again) == 1, str(len(again)))
+        check("a re-publish replaces its day rather than duplicating it",
+              sum(item.get("date") == "2026-08-04" for item in again) == 1, str(len(again)))
 
 
 def test_the_audit_catches_what_the_lens_would_miss() -> None:
@@ -162,11 +171,15 @@ def test_the_audit_catches_what_the_lens_would_miss() -> None:
     print("\nthe independent guard:")
     clean = PL.build_public_payload({"generated_at": "x", "shortlist": [listing()]})
     check("a properly built payload audits clean", PL.audit_public_payload(clean) == [])
+    cloud = json.loads(json.dumps(clean))
+    cloud["origin"] = "cloud"
+    check("the cloud publisher's origin label audits clean", PL.audit_public_payload(cloud) == [])
 
     leaked = json.loads(json.dumps(clean))
     leaked["some_new_export"] = {"rows": [{"contact_phone": "917-555-0142"}]}
     problems = PL.audit_public_payload(leaked)
-    check("a hand-injected personal field is caught", len(problems) == 1, str(problems))
+    check("a hand-injected personal field is caught",
+          any("contact_phone" in p for p in problems), str(problems))
 
     accused = json.loads(json.dumps(clean))
     accused["note"] = "flagged on the bad actor list"
@@ -177,6 +190,165 @@ def test_the_audit_catches_what_the_lens_would_miss() -> None:
     unlabelled.pop("lens")
     check("a payload not labelled 'public' is caught",
           any("lens" in p for p in PL.audit_public_payload(unlabelled)))
+
+
+def test_audit_fails_closed_for_malformed_public_containers() -> None:
+    print("\nmalformed known containers fail closed:")
+    clean = PL.build_public_payload(
+        {"generated_at": "x", "shortlist": [listing()]},
+        extras={
+            "pool": [listing()],
+            "state_buckets": {"shortlisted": [listing()]},
+            "transit_tables": {"L": [["Lorimer St", 180]]},
+        },
+    )
+    check("the valid container shapes audit clean", PL.audit_public_payload(clean) == [])
+
+    malformed_pool = json.loads(json.dumps(clean))
+    malformed_pool["pool"] = {"not": "an array"}
+    check("a non-array pool fails", any("$.pool — must be an array" in p for p in PL.audit_public_payload(malformed_pool)))
+
+    null_pool = json.loads(json.dumps(clean))
+    null_pool["pool"] = None
+    check("a present null pool fails", any("$.pool — must be an array" in p for p in PL.audit_public_payload(null_pool)))
+
+    null_daily_rows = json.loads(json.dumps(clean))
+    null_daily_rows["daily_changes"] = {"new_listings": None}
+    check("a present null daily listing array fails",
+          any("$.daily_changes.new_listings — must be an array" in p
+              for p in PL.audit_public_payload(null_daily_rows)))
+
+    malformed_buckets = json.loads(json.dumps(clean))
+    malformed_buckets["state_buckets"] = {"invented_bucket": 1, "shortlisted": "one"}
+    bucket_problems = PL.audit_public_payload(malformed_buckets)
+    check("unknown or non-count state buckets fail",
+          any("invented_bucket" in p and "schema" in p for p in bucket_problems)
+          and any("shortlisted" in p and "count" in p for p in bucket_problems), str(bucket_problems))
+
+    malformed_transit = json.loads(json.dumps(clean))
+    malformed_transit["transit_tables"] = {"L": "not a stop array", "G": [["Court Sq", -1]]}
+    transit_problems = PL.audit_public_payload(malformed_transit)
+    check("malformed transit tables fail",
+          any("transit_tables.L" in p and "array" in p for p in transit_problems)
+          and any("transit_tables.G[0]" in p for p in transit_problems), str(transit_problems))
+
+    malformed_nested = json.loads(json.dumps(clean))
+    malformed_nested["pool"][0]["transit"] = "not an object"
+    check("malformed nested containers fail",
+          any("pool[0].transit — must be an object" in p for p in PL.audit_public_payload(malformed_nested)))
+
+    malformed_market = json.loads(json.dumps(clean))
+    malformed_market["market_context"] = {"series": {"all_nyc": {"median_asking_rent": "not an array"}}}
+    check("malformed market-series containers fail",
+          any("market_context.series.all_nyc.median_asking_rent — must be an array" in p
+              for p in PL.audit_public_payload(malformed_market)))
+
+    scalar_slots = json.loads(json.dumps(clean))
+    scalar_slots["generated_at"] = {"hidden": "value"}
+    scalar_slots["pool"][0]["rent"] = [2200]
+    scalar_slots["sources"] = [{"source_name": {"hidden": "value"}, "record_count": 1}]
+    scalar_problems = PL.audit_public_payload(scalar_slots)
+    check("containers cannot hide in top-level or nested scalar slots",
+          any("$.generated_at — must be a finite JSON scalar" in p for p in scalar_problems)
+          and any("$.pool[0].rent — must be a finite JSON scalar" in p for p in scalar_problems)
+          and any("$.sources[0].source_name — must be a finite JSON scalar" in p for p in scalar_problems),
+          str(scalar_problems))
+
+    wrong_scalar_types = json.loads(json.dumps(clean))
+    wrong_scalar_types["generated_at"] = 123
+    wrong_scalar_types["pool"][0]["rent"] = "2200"
+    wrong_scalar_types["sources"] = [{"source_name": 42, "record_count": 1}]
+    wrong_type_problems = PL.audit_public_payload(wrong_scalar_types)
+    check("typed scalar contracts reject the wrong primitive type",
+          any("$.generated_at — must be a string" in p for p in wrong_type_problems)
+          and any("$.pool[0].rent — must be a number" in p for p in wrong_type_problems)
+          and any("$.sources[0].source_name — must be a string" in p for p in wrong_type_problems),
+          str(wrong_type_problems))
+
+    unguarded_listing_fields = []
+    for field in PL.PUBLIC_LISTING_SCALAR_FIELDS:
+        probe = json.loads(json.dumps(clean))
+        probe["pool"][0][field] = {"hidden": "value"}
+        if not any(f"$.pool[0].{field} — must be a finite JSON scalar" in p
+                   for p in PL.audit_public_payload(probe)):
+            unguarded_listing_fields.append(field)
+    check("every listing scalar slot rejects containers",
+          not unguarded_listing_fields, str(sorted(unguarded_listing_fields)))
+
+    non_finite = json.loads(json.dumps(clean))
+    non_finite["pool"][0]["rent"] = float("nan")
+    check("non-finite numbers fail",
+          any("$.pool[0].rent" in p and ("finite" in p or "valid JSON" in p)
+              for p in PL.audit_public_payload(non_finite)))
+
+    absent_optional = {"lens": "public", "generated_at": "x"}
+    check("genuinely absent optional containers remain valid",
+          PL.audit_public_payload(absent_optional) == [])
+
+
+def test_public_schema_is_complete_and_private_by_default() -> None:
+    print("\nexplicit listing schema and generic sensitive guards:")
+    source = listing(
+        owner_email="owner@example.com",
+        unusual_safe_new_field="do not publish this yet",
+        component_scores={"search_fit": 8, "private_token": "not public"},
+        landlord_portfolio={"bldgs": 2, "contact_name": "Maria Ortega"},
+        landlord_reason_summary=["Public landlord record match"],
+        transit={"station": "Lorimer St", "lines": ["L", "G"], "phone": "917-555-0142"},
+        price_history=[["2026-08-01", 2200], ["not-a-date-only"], {"rent": 2200}],
+    )
+    pub = PL.build_public_payload(
+        {"generated_at": "x", "shortlist": [source]},
+        extras={"pool": [source]},
+    )
+    entry = pub["pool"][0]
+    check("legitimate UI fields remain",
+          entry.get("listing_uid") == "u1" and entry.get("rent") == 2200
+          and entry.get("landlord_reason_summary") == ["Public landlord record match"])
+    check("alternate sensitive names are absent",
+          "owner_email" not in entry and "unusual_safe_new_field" not in entry)
+    check("nested objects are projected too",
+          entry.get("component_scores") == {"search_fit": 8}
+          and entry.get("landlord_portfolio") == {"bldgs": 2}
+          and entry.get("transit") == {"station": "Lorimer St", "lines": ["L", "G"]})
+    check("malformed nested value shapes are absent", entry.get("price_history") == [["2026-08-01", 2200]])
+    check("clean projection passes the independent audit", PL.audit_public_payload(pub) == [])
+
+    aggregate = json.loads(json.dumps(pub))
+    aggregate["pool"][0]["contact_reuse_count"] = 3
+    check("the approved contact-reuse aggregate audits clean",
+          PL.audit_public_payload(aggregate) == [])
+
+    injected = json.loads(json.dumps(pub))
+    injected["pool"][0]["alternate_contact_channel"] = "owner@example.com"
+    injected["pool"][0]["component_scores"]["future_metric"] = 9
+    injected["pool"][0]["trust_caveats"] = ["Call +1 (917) 555-0142"]
+    problems = PL.audit_public_payload(injected)
+    check("generic sensitive key and value checks reject alternate names",
+          any("alternate_contact_channel" in p for p in problems)
+          and any("email-like value" in p for p in problems)
+          and any("phone-like value" in p for p in problems), str(problems))
+    check("nested unknown keys are rejected",
+          any("component_scores.future_metric" in p for p in problems), str(problems))
+
+    personal_contact = json.loads(json.dumps(aggregate))
+    personal_contact["pool"][0]["contact_email"] = "owner@example.com"
+    check("contact-like personal keys still fail",
+          any("contact_email" in p for p in PL.audit_public_payload(personal_contact)))
+
+
+def test_audit_scans_every_listing_not_only_the_first_400() -> None:
+    print("\nthe complete publication traversal:")
+    clean = PL.build_public_payload(
+        {"generated_at": "x", "shortlist": [listing()]},
+        extras={"pool": [listing()]},
+    )
+    base = clean["pool"][0]
+    clean["pool"] = [dict(base, listing_uid=f"u{index}") for index in range(401)]
+    clean["pool"].append(dict(base, listing_uid="leak-after-400", contact_phone="917-555-0142"))
+    problems = PL.audit_public_payload(clean)
+    check("a leak after item 400 is caught",
+          any("pool[401].contact_phone" in p for p in problems), str(problems))
 
 
 def test_hunt_lens_stays_private_by_contrast() -> None:
@@ -199,6 +371,9 @@ if __name__ == "__main__":
     test_owner_only_and_watchlist_sections()
     test_archive_cannot_outrun_the_feed()
     test_the_audit_catches_what_the_lens_would_miss()
+    test_audit_fails_closed_for_malformed_public_containers()
+    test_public_schema_is_complete_and_private_by_default()
+    test_audit_scans_every_listing_not_only_the_first_400()
     test_hunt_lens_stays_private_by_contrast()
     print()
     if FAILURES:
