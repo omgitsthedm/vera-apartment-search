@@ -1,7 +1,7 @@
 ---
 contentType: Reference
 title: Operate and recover VERA
-verified: 2026-08-13
+verified: 2026-08-15
 ---
 
 # Operate and recover VERA
@@ -112,7 +112,91 @@ EXPECTED_REVISION=commit_sha npm run quality:live
 
 Use the narrowest proportional lane. A production candidate requires `quality:release` before push and revision-bound `quality:live` after Netlify reports the exact deploy ready.
 
-## VERA 2.0 public release record
+## 2026-08-14/15 restoration record
+
+VERA stayed reachable, but the public app did not meet its product contract. A slow feed could leave the interface waiting, a browser transition could reject, and Atlas could show coarse blocks or an empty map after a warm route remount. Some listings could also carry an incorrect borough label or coordinates that did not belong in the public map. This record covers the corrective release and the matching engine scope repair.
+
+### What changed
+
+The website repair includes:
+
+- A `3.5s` soft feed status and a `12s` terminal retry, so a slow response does not silently strand the interface
+- A safe fallback when a browser View Transition times out
+- Browser-side coordinate and borough defenses for Atlas, plus real streets and buildings instead of the old block-only treatment
+- Refined loading, receipt, filter, and mobile layouts with native controls
+- Atlas remount protection: the app mounts the map on the next animation frame after a route transition, which prevents a blank canvas after `Today` then `Atlas`
+- Asset query version `v60` and Progressive Web App shell cache `vera-shell-v12`
+
+The engine repair is `4ab12e8c845848854518f2b10f42a22952dc0c3e`, the merge of the four-borough public-scope change. `scripts/public_lens.py` is the canonical geography authority for the public payload. New York City Neighborhood Tabulation Area polygons resolve a valid coordinate pair before a source borough label. A listing outside Manhattan, Brooklyn, Queens, or the Bronx, with invalid or incomplete coordinates, or without an approved borough when it has no coordinates, cannot reach any public listing surface. The lens then writes the resolved borough back to the sanitized record, and `audit_public_payload()` rejects a mismatch.
+
+The browser checks this contract again before rendering Atlas. This second check protects visitors from stale or malformed feed data. It does not replace the engine lens or permit the browser to access private data.
+
+### Release evidence
+
+| Surface | Verified value | Status on 2026-08-15 |
+| --- | --- | --- |
+| Engine `main` | `4ab12e8c845848854518f2b10f42a22952dc0c3e` | Merged four-borough scope enforcement |
+| Engine `feed` | `966de3d0afae472c282b6987d9c024b6bd884f27` | Sanitized cloud feed after the scoped sweep |
+| Cloud sweep | [Run 31859782209](https://github.com/omgitsthedm/vera-apartment-search/actions/runs/31859782209) | Succeeded |
+| Feed metadata | Generated `2026-08-15T02:59:08+00:00`; pool `267`; shortlist `24` | Live first-party data matched the feed commit |
+| Initial website recovery | `9dac6a76c876fbef50ad9584cd927068873c88c9` | Live through Git-connected Netlify |
+| Initial Netlify deploy | `6a7fd1f274e9be00089d10c3` | Ready production deploy, published `2026-08-15T02:42:34.906Z` |
+| Atlas remount correction | `8ec1106641005e646a276d5700293f61b2bc5e65` | Merged through [website PR 15](https://github.com/omgitsthedm/littlefightnyc-website/pull/15) |
+| Corrective Netlify deploy | `6a7fda7c92046d000814a720` | Ready production deploy, published `2026-08-15T03:19:02.923Z` |
+| Live release | `8ec1106641005e646a276d5700293f61b2bc5e65` | `/release.json` matched GitHub `main`; `quality:live` passed |
+
+The scoped live feed audit found no public-payload or geography problems. It contained `149` Manhattan, `71` Brooklyn, `32` Queens, and `15` Bronx listings. Of `267` listings, `206` had coordinates and `61` used the permitted no-coordinate borough path. These counts are a dated observation, not a product guarantee.
+
+The website recovery gate passed `312` unit tests and `239` browser executions. The Atlas remount regression passed on desktop Chromium, mobile Chromium, Firefox, desktop WebKit, iPhone WebKit, and iPad WebKit. A production browser check then loaded `15` rendered features, navigated from `Atlas` to `Today` and back to `Atlas`, and confirmed one map canvas with `15` rendered features, detailed streets, and 3D buildings. Treat a later browser, feed, or map-library change as a reason to rerun the gate, not as proof that the same result still holds.
+
+### Revalidate a public release
+
+Run the website commands from the canonical website repository under Node 24:
+
+```bash
+npm run quality:release
+EXPECTED_REVISION=commit_sha npm run quality:live
+curl -fsSL https://littlefightnyc.com/release.json
+curl -fsSIL https://littlefightnyc.com/vera/
+curl -fsSIL https://littlefightnyc.com/vera/data/public.json
+curl -fsSIL https://littlefightnyc.com/vera/data/archive.json
+curl -fsSIL https://littlefightnyc.com/vera/data/meta.json
+```
+
+Replace `commit_sha` with the exact merged website revision. Confirm that `/release.json` reports that revision and that Netlify marks the corresponding Git-connected production deploy ready. Then test a fresh Atlas load and the route sequence `Atlas` to `Today` to `Atlas` on the relevant browser profiles. Do not perform a manual Netlify production deploy.
+
+To validate the engine boundary without opening private runtime data, run:
+
+```bash
+python3 tests/test_scoring.py
+python3 tests/test_mail_ingest.py
+python3 tests/test_public_lens.py
+python3 tests/test_source_honesty.py
+python3 tests/test_neighborhood_gate.py
+python3 tests/test_public_product_boundary.py
+```
+
+Refresh the release chain before a recovery action:
+
+```bash
+git ls-remote https://github.com/omgitsthedm/littlefightnyc-website.git \
+  HEAD refs/heads/main
+git ls-remote https://github.com/omgitsthedm/vera-apartment-search.git \
+  HEAD refs/heads/main refs/heads/feed
+curl -fsSL https://littlefightnyc.com/release.json
+```
+
+### Recovery, rollback, and follow-up
+
+Recover or roll back the public application by creating a reviewed Git commit from a known website revision, merging it to website `main`, and verifying the new Git-connected Netlify deployment. Do not republish a historical Netlify deploy, recreate `vera-pipeline`, or restore the dashboard.
+
+Recover the engine from engine `main`. Restore private runtime state only from an owner-approved private backup. Never use the public `feed` branch as a private-state backup. Restore LaunchAgents only from `configs/launchd-v2/` during an authorized maintenance window after checking every absolute path.
+
+The root website dependency report still identifies a separate shared maintenance item: update `@netlify/blobs` from `10.7.11` to `10.7.13`. The update clears the reported root advisory, but it belongs to shared Little Fight and Dakota code. Do not fold it into a VERA incident release without separate scope and validation.
+
+The next action is to observe the next scheduled feed publication and rerun the same first-party feed and geography checks if its listing counts or scope change. Keep the browser at `littlefightnyc.com/vera/` and keep the engine private boundary unchanged.
+
+## Earlier VERA 2.0 public release record
 
 The public VERA 2.0 release is live through the existing website rail. This is
 a browser-product record, not an engine or feed-schema release.
