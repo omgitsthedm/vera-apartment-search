@@ -428,17 +428,15 @@ def build_craigslist_searches(source: dict[str, Any], preferences: dict[str, Any
     cap is a politeness and runtime limit, not an arbitrary one. It was a
     flat 50 across five boroughs, and measured on 2026-08-04 the sapi had:
 
-        manhattan  89   brooklyn 647   queens 303   bronx 83   staten 25
+        manhattan  89   brooklyn 647   queens 303   bronx 83
 
-    1,147 listings returned in five requests, of which 225 were kept and
-    **922 were discarded after they had already been fetched**. Worse, 125
-    of those 250 detail fetches went to Queens, the Bronx and Staten Island
-    — which between them contain not one of the target neighbourhoods.
+    The four borough feeds are much wider than the private target-neighborhood
+    list. Queens and the Bronx remain part of the public product even though
+    the private target-neighborhood list is narrower.
 
     So the budget is now allocated rather than divided: most of it to the
-    boroughs the targets actually live in, a real but small sample of the
-    rest so the Market page stays the whole net. Same number of detail
-    fetches, roughly double the in-target coverage.
+    boroughs the targets actually live in, with a real but small sample of
+    Queens and the Bronx. Staten Island is not part of VERA's public scope.
     """
     query_terms = list(source.get("query_terms") or preferences.get("neighborhoods") or [])
     max_rent = effective_max_rent(source, preferences)

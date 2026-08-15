@@ -22,11 +22,10 @@
         "Manhattan",
         "Brooklyn",
         "Queens",
-        "Bronx",
-        "Staten Island"
+        "Bronx"
       ],
       "raw_output_dir": "/Users/davidmarsh/Code/Personal/vera-apartment-search/raw/craigslist",
-      "notes": "2026-07-23: craigslist HTML search became a JS shell (no result links); discovery now uses the public sapi.craigslist.org JSON search endpoint (same data the shell loads) and still fetches detail pages as HTML. Query terms switched from neighborhood text queries to borough-scoped searches (mnh/brk/que/brx/stn + /apa), city-wide as of 2026-07-23: posters pick neighborhoods from a dropdown, not ad text, so text queries matched only ~60 spam-heavy items while borough feeds carry the real inventory. Neighborhood matching happens downstream from geo/hood data. Rate limits and cache reuse unchanged."
+      "notes": "2026-07-23: craigslist HTML search became a JS shell (no result links); discovery now uses the public sapi.craigslist.org JSON search endpoint (same data the shell loads) and still fetches detail pages as HTML. Query terms use the four public borough feeds (mnh/brk/que/brx + /apa): posters pick neighborhoods from a dropdown, not ad text, so text queries matched only ~60 spam-heavy items while borough feeds carry the real inventory. Neighborhood matching happens downstream from geo/hood data. Rate limits and cache reuse unchanged."
     },
     {
       "source_name": "streeteasy",

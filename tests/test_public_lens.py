@@ -59,6 +59,7 @@ def listing(**kw):
         "hpd_risk_score": 12.0,
         "dob_risk_score": 4.0,
         "source_name": "craigslist",
+        "borough": "Brooklyn",
         **PERSONAL,
     }
     d.update(kw)
@@ -78,6 +79,73 @@ def test_personal_layer_never_ships() -> None:
     blob = json.dumps(pub)
     for field, value in PERSONAL.items():
         check(f"{field} is gone", field not in blob and value not in blob)
+
+
+def test_four_borough_public_scope() -> None:
+    print("\nthe four-borough public scope:")
+    # Coordinates are authoritative, even when a source's borough label says
+    # something else. No-coordinate records need an explicit allowed borough.
+    coordinate_manhattan = listing(
+        listing_uid="coordinate-manhattan", borough="Staten Island",
+        latitude=40.7288, longitude=-73.9828,
+    )
+    coordinate_brooklyn = listing(
+        listing_uid="coordinate-brooklyn", borough="Unknown",
+        latitude=40.7143, longitude=-73.9540,
+    )
+    coordinate_queens = listing(
+        listing_uid="coordinate-queens", borough="Unknown",
+        latitude=40.7606, longitude=-73.7968,
+    )
+    coordinate_bronx = listing(
+        listing_uid="coordinate-bronx", borough="Unknown",
+        latitude=40.8448, longitude=-73.8648,
+    )
+    declared_queens = listing(listing_uid="declared-queens", borough="Queens")
+    staten_island = listing(
+        listing_uid="staten-island", borough="Brooklyn",
+        latitude=40.5795, longitude=-74.1502,
+    )
+    unresolved_coordinates = listing(
+        listing_uid="outside-polygons", borough="Manhattan",
+        latitude=40.7000, longitude=-74.0000,
+    )
+    unknown_without_coordinates = listing(listing_uid="unknown", borough=None)
+    candidates = [
+        coordinate_manhattan, coordinate_brooklyn, coordinate_queens,
+        coordinate_bronx, declared_queens, staten_island, unresolved_coordinates,
+        unknown_without_coordinates,
+    ]
+    hunt = {
+        "generated_at": "2026-08-04T00:00:00+00:00",
+        "shortlist": candidates,
+        "manual_review": candidates,
+        "daily_changes": {
+            "new_listings": candidates,
+            "price_changes": candidates,
+            "gone_listings": candidates,
+        },
+    }
+    pub = PL.build_public_payload(hunt, extras={"pool": candidates})
+    expected = {
+        "coordinate-manhattan", "coordinate-brooklyn", "coordinate-queens",
+        "coordinate-bronx", "declared-queens",
+    }
+    rows = [pub["pool"], pub["shortlist"], pub["manual_review"]]
+    rows.extend(pub["daily_changes"][key] for key in ("new_listings", "price_changes", "gone_listings"))
+    surface_ids = [{item["listing_uid"] for item in group} for group in rows]
+    check("every public listing surface is four-borough scoped",
+          all(ids == expected for ids in surface_ids), str(surface_ids))
+    manhattan = next(item for item in pub["pool"] if item["listing_uid"] == "coordinate-manhattan")
+    check("coordinates override a conflicting source borough", manhattan.get("borough") == "Manhattan")
+    check("a no-coordinate allowed borough remains publishable",
+          any(item["listing_uid"] == "declared-queens" and item.get("borough") == "Queens" for item in pub["pool"]))
+    check("the completed scoped payload passes the independent audit", PL.audit_public_payload(pub) == [])
+
+    injected = json.loads(json.dumps(pub))
+    injected["pool"].append(PL.sanitize_listing(staten_island))
+    check("the audit rejects an injected out-of-scope listing",
+          any("four-borough public scope" in problem for problem in PL.audit_public_payload(injected)))
 
 
 def test_a_section_nobody_sanitized() -> None:
@@ -366,6 +434,7 @@ def test_hunt_lens_stays_private_by_contrast() -> None:
 
 if __name__ == "__main__":
     test_personal_layer_never_ships()
+    test_four_borough_public_scope()
     test_a_section_nobody_sanitized()
     test_watchlist_accusations_are_neutralized()
     test_owner_only_and_watchlist_sections()

@@ -1,7 +1,7 @@
 ---
 contentType: Reference
 title: Operate and recover VERA
-verified: 2026-08-10
+verified: 2026-08-13
 ---
 
 # Operate and recover VERA
@@ -111,6 +111,27 @@ EXPECTED_REVISION=commit_sha npm run quality:live
 ```
 
 Use the narrowest proportional lane. A production candidate requires `quality:release` before push and revision-bound `quality:live` after Netlify reports the exact deploy ready.
+
+## VERA 2.0 public release record
+
+The public VERA 2.0 release is live through the existing website rail. This is
+a browser-product record, not an engine or feed-schema release.
+
+| Field | Verified release value |
+| --- | --- |
+| Release ID | `vera-2.0-2026-08-13` |
+| Public feature commit | `5320c757ab89ac44c90658d207ac6ccb3f8cec7f` |
+| Final public revision | `0a4d1d4a31ea3c2ac1f512afa653bb305dbc9183` |
+| Netlify production deploy | `6a7d752e5c61310008bc3a9f`, ready and tied to the final revision |
+| Public verification | `quality:release` PASS with 173/173 browser executions; revision-bound `quality:live` PASS; live VERA harness 160/160 |
+| Release decision | `In Observation`; no known P0/P1 product blocker, with dated operational and manual-device follow-up retained in the dossier |
+| Durable dossier | Website repository `.lifi/evidence/releases/vera-2.0-2026-08-13/` |
+
+The release did not change engine code, private runtime data, ranking, feed
+schema, feed publication, or LaunchAgent schedules. The dossier may record
+public release facts and redacted evidence only. It must not absorb raw listing
+data, contacts, credentials, private paths beyond routing references, or engine
+runtime artifacts.
 
 ## Evidence snapshot
 
