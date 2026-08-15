@@ -29,10 +29,15 @@ from __future__ import annotations
 import json
 import math
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
 ENGINE_ROOT = Path(__file__).resolve().parents[1]
+if str(ENGINE_ROOT) not in sys.path:
+    sys.path.insert(0, str(ENGINE_ROOT))
+
+from config.nta_lookup import borough_at  # noqa: E402
 
 # ── Public schema and sensitive-data guard ────────────────────────────
 #
@@ -127,6 +132,24 @@ PUBLIC_STATE_BUCKET_FIELDS = frozenset({
     "parse_failed", "shortlisted",
 })
 
+# VERA's public demo is deliberately bounded to the four boroughs in its
+# current product scope. This is a publication rule, not a private-search
+# criterion: private runs can retain records for audit and source-health work,
+# but no other geography may reach the browser contract.
+PUBLIC_BOROUGH_NAMES = {
+    "M": "Manhattan",
+    "B": "Brooklyn",
+    "Q": "Queens",
+    "X": "Bronx",
+}
+PUBLIC_BOROUGH_ALIASES = {
+    "manhattan": "Manhattan",
+    "brooklyn": "Brooklyn",
+    "queens": "Queens",
+    "bronx": "Bronx",
+    "the bronx": "Bronx",
+}
+
 # A count is a public aggregate, not a contact channel. Keep this exception
 # narrow and type-checked: spelling it like a contact field must not let a
 # name, email, phone, or free-form value bypass the generic sensitive-key
@@ -143,6 +166,66 @@ PUBLIC_LISTING_CONTAINER_FIELDS = frozenset({
     "landlord_portfolio", "price_history", "scam_cues_found", "transit",
 }) | PUBLIC_LISTING_STRING_LIST_FIELDS
 PUBLIC_LISTING_SCALAR_FIELDS = PUBLIC_LISTING_FIELDS - PUBLIC_LISTING_CONTAINER_FIELDS
+
+
+def public_borough_for_listing(entry: Any) -> tuple[str | None, str | None]:
+    """Return the public borough, or a reason the listing cannot be public.
+
+    Coordinates win over a source label whenever they resolve through NYC's
+    NTA polygons. A coordinate pair outside those polygons is not guessed at,
+    and a listing with no coordinates needs an explicit four-borough label.
+    This keeps the public map and every listing surface inside VERA's stated
+    Manhattan/Brooklyn/Queens/Bronx boundary.
+    """
+    if not isinstance(entry, dict):
+        return None, "listing is not an object"
+
+    latitude = entry.get("latitude")
+    longitude = entry.get("longitude")
+    latitude_present = latitude is not None
+    longitude_present = longitude is not None
+    coordinates_present = latitude_present or longitude_present
+    valid_pair = (
+        isinstance(latitude, (int, float)) and not isinstance(latitude, bool)
+        and isinstance(longitude, (int, float)) and not isinstance(longitude, bool)
+        and math.isfinite(latitude) and math.isfinite(longitude)
+    )
+    if coordinates_present:
+        if not valid_pair:
+            return None, "coordinates are incomplete or invalid"
+        borough_code = borough_at(latitude, longitude)
+        borough = PUBLIC_BOROUGH_NAMES.get(str(borough_code or ""))
+        if borough is None:
+            return None, "coordinates do not resolve inside the four-borough scope"
+        return borough, None
+
+    declared = re.sub(r"\s+", " ", str(entry.get("borough") or "").strip().lower())
+    borough = PUBLIC_BOROUGH_ALIASES.get(declared)
+    if borough is None:
+        return None, "borough is unknown without coordinates"
+    return borough, None
+
+
+def scope_public_listing(entry: Any) -> dict[str, Any] | None:
+    """Project one already-sanitized listing into VERA's public geography."""
+    borough, _reason = public_borough_for_listing(entry)
+    if borough is None or not isinstance(entry, dict):
+        return None
+    scoped = dict(entry)
+    scoped["borough"] = borough
+    return scoped
+
+
+def scope_public_listings(entries: Any) -> list[dict[str, Any]]:
+    """Keep only listings that meet the four-borough public contract."""
+    if not isinstance(entries, list):
+        return []
+    scoped: list[dict[str, Any]] = []
+    for entry in entries:
+        item = scope_public_listing(entry)
+        if item is not None:
+            scoped.append(item)
+    return scoped
 
 # Existing direct fields remain explicitly denied even if a future schema edit
 # accidentally adds one. These are owner-only inspection/runtime details, not
@@ -540,7 +623,9 @@ def build_public_payload(hunt: dict[str, Any],
 
     for key in ("shortlist", "manual_review"):
         if isinstance(hunt.get(key), list):
-            public[key] = [sanitize_listing(item) for item in hunt[key] if isinstance(item, dict)]
+            public[key] = scope_public_listings(
+                [sanitize_listing(item) for item in hunt[key] if isinstance(item, dict)]
+            )
 
     daily = hunt.get("daily_changes")
     if isinstance(daily, dict):
@@ -549,9 +634,9 @@ def build_public_payload(hunt: dict[str, Any],
             projected["counts"] = _object(daily["counts"], PUBLIC_DAILY_COUNT_FIELDS)
         for list_key in ("new_listings", "price_changes", "gone_listings"):
             if isinstance(daily.get(list_key), list):
-                projected[list_key] = [
+                projected[list_key] = scope_public_listings([
                     sanitize_listing(item) for item in daily[list_key] if isinstance(item, dict)
-                ]
+                ])
         public["daily_changes"] = projected
 
     # skip_insights is derived from counts; only its compact public shape is
@@ -566,7 +651,9 @@ def build_public_payload(hunt: dict[str, Any],
 
     if extras:
         if isinstance(extras.get("pool"), list):
-            public["pool"] = [sanitize_listing(item) for item in extras["pool"] if isinstance(item, dict)]
+            public["pool"] = scope_public_listings(
+                [sanitize_listing(item) for item in extras["pool"] if isinstance(item, dict)]
+            )
         if isinstance(extras.get("run_trends"), list):
             public["run_trends"] = _object_list(extras["run_trends"], PUBLIC_TREND_FIELDS)
         if isinstance(extras.get("sources"), list):
@@ -795,6 +882,13 @@ def audit_public_payload(public: Any) -> list[str]:
                 "latitude": "number", "longitude": "number", "rent": "number",
                 "source_name": "string",
             })
+            public_borough, scope_reason = public_borough_for_listing(item)
+            if public_borough is None:
+                problems.append(f"{item_path} — outside VERA's four-borough public scope: {scope_reason}")
+            elif item.get("borough") != public_borough:
+                problems.append(
+                    f"{item_path}.borough — must match coordinate-resolved public borough {public_borough}"
+                )
             component_scores = object_field(
                 item, "component_scores", f"{item_path}.component_scores",
                 PUBLIC_COMPONENT_SCORE_FIELDS,
