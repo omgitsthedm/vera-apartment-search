@@ -192,7 +192,7 @@ Recover or roll back the public application by creating a reviewed Git commit fr
 
 Recover the engine from engine `main`. Restore private runtime state only from an owner-approved private backup. Never use the public `feed` branch as a private-state backup. Restore LaunchAgents only from `configs/launchd-v2/` during an authorized maintenance window after checking every absolute path.
 
-The root website dependency report still identifies a separate shared maintenance item: update `@netlify/blobs` from `10.7.11` to `10.7.13`. The update clears the reported root advisory, but it belongs to shared Little Fight and Dakota code. Do not fold it into a VERA incident release without separate scope and validation.
+The separate shared website dependency item is complete. Website `main` revision `1a74dce054d56653430ac8d2742e0a08cc6fe6d8` updates `@netlify/blobs` from `10.7.11` to `10.7.13` without changing VERA application files, clears the production dependency audit, and is live as Netlify production deploy `6a80385d91786e0008821986`. The isolated Node 24 release gate passed 312 Dakota tests, 239 multi-engine browser tests, the build and substantive audits, followed by revision-bound `quality:live`. Five unrelated dirty Little Fight entries were excluded and remain preserved in the canonical checkout.
 
 The next action is to observe the next scheduled feed publication and rerun the same first-party feed and geography checks if its listing counts or scope change. Keep the browser at `littlefightnyc.com/vera/` and keep the engine private boundary unchanged.
 
