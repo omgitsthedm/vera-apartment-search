@@ -1,7 +1,7 @@
 ---
 contentType: Reference
 title: Operate and recover VERA
-verified: 2026-08-15
+verified: 2026-08-16
 ---
 
 # Operate and recover VERA
@@ -33,6 +33,8 @@ public engine source and private runtime state
   -> scripts/public_lens.py and audit_public_payload()
   -> public.json, archive.json, and meta.json on the engine feed branch
   -> exact Little Fight Netlify rewrites under /vera/data/
+  -> validated Netlify edge cache with bounded stale-while-revalidate
+  -> VERA service worker's last-valid publication cache
   -> anonymous browser at littlefightnyc.com/vera/
 ```
 
@@ -59,7 +61,9 @@ Use this rail:
 3. Push only the authorized commit to `main`.
 4. Wait for that exact revision to become the ready production deploy.
 5. Run `EXPECTED_REVISION=commit_sha npm run quality:live`.
-6. Verify `/release.json`, `/vera/`, and all three `/vera/data/*` responses.
+6. Verify `/release.json`, `/vera/`, and all three `/vera/data/*` responses. A
+   conditional feed GET must still return `200` with a complete JSON body; a
+   bodyless `304` is a release failure.
 
 Never run `netlify deploy --prod`, restore a dedicated VERA Netlify project, add VERA Netlify credentials, or point the browser at an upstream host.
 
@@ -112,7 +116,7 @@ EXPECTED_REVISION=commit_sha npm run quality:live
 
 Use the narrowest proportional lane. A production candidate requires `quality:release` before push and revision-bound `quality:live` after Netlify reports the exact deploy ready.
 
-## 2026-08-14/15 restoration record
+## 2026-08-14–16 restoration and publication-resilience record
 
 VERA stayed reachable, but the public app did not meet its product contract. A slow feed could leave the interface waiting, a browser transition could reject, and Atlas could show coarse blocks or an empty map after a warm route remount. Some listings could also carry an incorrect borough label or coordinates that did not belong in the public map. This record covers the corrective release and the matching engine scope repair.
 
@@ -120,20 +124,56 @@ VERA stayed reachable, but the public app did not meet its product contract. A s
 
 The website repair includes:
 
-- A `3.5s` soft feed status and a `12s` terminal retry, so a slow response does not silently strand the interface
+- A `3.5s` soft loading status, a `45s` timeout for each attempt, and three
+  bounded attempts separated by `750ms` and `2250ms`; a valid `Retry-After` is
+  honored up to `10s`
+- A fresh manual retry after those attempts, plus guarded resume handling for
+  persisted page restores and a visible returning iOS/WebKit tab
+- Generation ownership and cancellation so an older request cannot overwrite
+  a newer successful boot
 - A safe fallback when a browser View Transition times out
 - Browser-side coordinate and borough defenses for Atlas, plus real streets and buildings instead of the old block-only treatment
 - Refined loading, receipt, filter, and mobile layouts with native controls
 - Atlas remount protection: the app mounts the map on the next animation frame after a route transition, which prevents a blank canvas after `Today` then `Atlas`
-- Asset query version `v60` and Progressive Web App shell cache `vera-shell-v12`
+- Application and CSS query version `v61` and Progressive Web App shell cache
+  `vera-shell-v14`; the map remains `v60`
 
 The engine repair is `4ab12e8c845848854518f2b10f42a22952dc0c3e`, the merge of the four-borough public-scope change. `scripts/public_lens.py` is the canonical geography authority for the public payload. New York City Neighborhood Tabulation Area polygons resolve a valid coordinate pair before a source borough label. A listing outside Manhattan, Brooklyn, Queens, or the Bronx, with invalid or incomplete coordinates, or without an approved borough when it has no coordinates, cannot reach any public listing surface. The lens then writes the resolved borough back to the sanitized record, and `audit_public_payload()` rejects a mismatch.
 
 The browser checks this contract again before rendering Atlas. This second check protects visitors from stale or malformed feed data. It does not replace the engine lens or permit the browser to access private data.
 
+### Publication transport repair
+
+The August 16 failure message was not caused by an absent feed. A repeat visit
+could forward a browser validator through the Netlify edge to the upstream
+publication, receive a bodyless `304`, and pass that non-OK response to the
+application even when the JSON publication itself was healthy.
+
+Website PRs [16](https://github.com/omgitsthedm/littlefightnyc-website/pull/16)
+and [17](https://github.com/omgitsthedm/littlefightnyc-website/pull/17) repair the
+complete path:
+
+- The edge uses the normal downstream request path, validates a complete
+  endpoint-specific JSON body, and never shares an error or malformed `200`.
+- Browser HTTP caching is disabled with `Cache-Control: no-store`, upstream
+  validators are removed, and a conditional first-party GET still returns a
+  complete `200` representation.
+- Netlify's private shared cache keeps a valid publication fresh for five
+  minutes and may serve it stale for up to 36 hours while revalidating.
+- The service worker validates public, archive, and metadata contracts before
+  saving or serving them. It falls back to the last valid cached publication on
+  a network failure, `304`, `429`, `5xx`, or malformed `200`; invalid legacy
+  entries are pruned.
+- Cache writes are tied to the fetch-event lifetime, and an older
+  `generated_at` value cannot overwrite a newer cached publication.
+
+The cached publication is an availability fallback, not proof of freshness.
+The displayed `generated_at` timestamp remains authoritative, and the browser
+labels a saved fallback as an offline copy.
+
 ### Release evidence
 
-| Surface | Verified value | Status on 2026-08-15 |
+| Surface | Verified value | Dated status |
 | --- | --- | --- |
 | Engine `main` | `4ab12e8c845848854518f2b10f42a22952dc0c3e` | Merged four-borough scope enforcement |
 | Engine `feed` | `966de3d0afae472c282b6987d9c024b6bd884f27` | Sanitized cloud feed after the scoped sweep |
@@ -144,10 +184,21 @@ The browser checks this contract again before rendering Atlas. This second check
 | Atlas remount correction | `8ec1106641005e646a276d5700293f61b2bc5e65` | Merged through [website PR 15](https://github.com/omgitsthedm/littlefightnyc-website/pull/15) |
 | Corrective Netlify deploy | `6a7fda7c92046d000814a720` | Ready production deploy, published `2026-08-15T03:19:02.923Z` |
 | Live release | `8ec1106641005e646a276d5700293f61b2bc5e65` | `/release.json` matched GitHub `main`; `quality:live` passed |
+| Publication retry and worker repair | `974cba66bc27e9a5134ee6d4982f062c32c26d73` | Merged through website PR 16 |
+| Final edge response contract | `a8bf1045b8d200f123347dea17eee35de6e8e7d1` | Merged through website PR 17; live `/release.json` matched |
+| Final Netlify deploy | `6a827b370ade700008da5e90` | Ready production deploy, published `2026-08-17T03:09:22.056Z` |
 
 The scoped live feed audit found no public-payload or geography problems. It contained `149` Manhattan, `71` Brooklyn, `32` Queens, and `15` Bronx listings. Of `267` listings, `206` had coordinates and `61` used the permitted no-coordinate borough path. These counts are a dated observation, not a product guarantee.
 
-The website recovery gate passed `312` unit tests and `239` browser executions. The Atlas remount regression passed on desktop Chromium, mobile Chromium, Firefox, desktop WebKit, iPhone WebKit, and iPad WebKit. A production browser check then loaded `15` rendered features, navigated from `Atlas` to `Today` and back to `Atlas`, and confirmed one map canvas with `15` rendered features, detailed streets, and 3D buildings. Treat a later browser, feed, or map-library change as a reason to rerun the gate, not as proof that the same result still holds.
+The final publication-resilience gate passed `312` unit tests and `248` browser
+executions across desktop and mobile Chromium, Firefox, desktop WebKit, iPhone
+WebKit, and iPad WebKit. Deterministic worker and edge suites cover `304`,
+`429`, `503`, rejected requests, invalid `200` bodies, legacy-cache migration,
+cache-write lifetime, out-of-order publications, slow success, automatic
+recovery, bounded retries, and manual retry. A production fresh boot and reload
+both rendered the current publication without the failure message or console
+errors. Treat later browser, feed, edge, or worker changes as a reason to rerun
+the gate, not as proof that the same result still holds.
 
 ### Revalidate a public release
 
@@ -158,9 +209,11 @@ npm run quality:release
 EXPECTED_REVISION=commit_sha npm run quality:live
 curl -fsSL https://littlefightnyc.com/release.json
 curl -fsSIL https://littlefightnyc.com/vera/
-curl -fsSIL https://littlefightnyc.com/vera/data/public.json
-curl -fsSIL https://littlefightnyc.com/vera/data/archive.json
-curl -fsSIL https://littlefightnyc.com/vera/data/meta.json
+curl -fsSL https://littlefightnyc.com/vera/data/public.json >/dev/null
+curl -fsSL https://littlefightnyc.com/vera/data/archive.json >/dev/null
+curl -fsSL https://littlefightnyc.com/vera/data/meta.json >/dev/null
+curl -fsSL -H 'If-None-Match: "vera-revalidation-check"' \
+  https://littlefightnyc.com/vera/data/public.json >/dev/null
 ```
 
 Replace `commit_sha` with the exact merged website revision. Confirm that `/release.json` reports that revision and that Netlify marks the corresponding Git-connected production deploy ready. Then test a fresh Atlas load and the route sequence `Atlas` to `Today` to `Atlas` on the relevant browser profiles. Do not perform a manual Netlify production deploy.
@@ -194,7 +247,10 @@ Recover the engine from engine `main`. Restore private runtime state only from a
 
 The separate shared website dependency item is complete. Website `main` revision `1a74dce054d56653430ac8d2742e0a08cc6fe6d8` updates `@netlify/blobs` from `10.7.11` to `10.7.13` without changing VERA application files, clears the production dependency audit, and is live as Netlify production deploy `6a80385d91786e0008821986`. The isolated Node 24 release gate passed 312 Dakota tests, 239 multi-engine browser tests, the build and substantive audits, followed by revision-bound `quality:live`. Five unrelated dirty Little Fight entries were excluded and remain preserved in the canonical checkout.
 
-The next action is to observe the next scheduled feed publication and rerun the same first-party feed and geography checks if its listing counts or scope change. Keep the browser at `littlefightnyc.com/vera/` and keep the engine private boundary unchanged.
+The next action is routine observation only: let the scheduled feed publication
+run and rerun the same first-party feed, conditional-response, and geography
+checks if its listing counts or scope change. Keep the browser at
+`littlefightnyc.com/vera/` and keep the engine privacy boundary unchanged.
 
 ## Earlier VERA 2.0 public release record
 
@@ -219,18 +275,22 @@ runtime artifacts.
 
 ## Evidence snapshot
 
-This snapshot was collected on 2026-08-10 and reconciled after the documentation closeout. Because this handoff is versioned inside the engine repository, it does not hard-code its own containing commit. Re-run the commands below before treating any revision, count, or workflow result as current.
+This snapshot was refreshed on 2026-08-16 after the publication-resilience
+release. Because this handoff is versioned inside the engine repository, it
+does not hard-code its own containing commit. Re-run the commands below before
+treating any revision, count, or workflow result as current.
 
 | Evidence | Observed value |
 | --- | --- |
-| Website GitHub `main` | `8f43c9a7b80791ac067702cfb9ee51934dbc33ca` |
-| Live `/release.json` revision | `8f43c9a7b80791ac067702cfb9ee51934dbc33ca`, production, clean source, built `2026-08-10T20:57:03.846Z` |
-| Netlify production deploy | `6a7a3b011b38280008c5886a`, ready, Git-connected `main`, published `2026-08-10T20:57:16.023Z` |
-| Engine `feed` branch | `a0d8509668000945fcc0e0fc3a9c42d7abef3422` |
+| Website GitHub `main` | `a8bf1045b8d200f123347dea17eee35de6e8e7d1` |
+| Live `/release.json` revision | `a8bf1045b8d200f123347dea17eee35de6e8e7d1`, production `main`, built `2026-08-17T03:09:08.852Z` |
+| Netlify production deploy | `6a827b370ade700008da5e90`, ready, Git-connected `main`, published `2026-08-17T03:09:22.056Z` |
+| Engine `main` | `2b0a5ec9426a27b6c4aa04d4fb6396232140ec55` |
+| Engine `feed` branch | `5e60d39ac89d89f05b55ed95b05b6694af34b1cb` |
 | Historical dashboard `main` | `ec61413b2ed6fb6225b46c706ab0711f65fe8d85`, GitHub repository archived and private |
-| Latest observed cloud sweep | [Run 31363590525](https://github.com/omgitsthedm/vera-apartment-search/actions/runs/31363590525), successful on engine revision `3604daab0f4e4f1dfbd434284756da4175668b70` |
-| Live feed metadata | Generated `2026-08-10T07:13:05Z`; pool `279`; shortlist `22` |
-| Live HTTP evidence | `/vera/`, `public.json`, `archive.json`, and `meta.json` returned HTTP `200` |
+| Latest observed cloud sweep | [Run 31930101946](https://github.com/omgitsthedm/vera-apartment-search/actions/runs/31930101946), successful on engine revision `2b0a5ec9426a27b6c4aa04d4fb6396232140ec55` |
+| Live feed metadata | Generated `2026-08-16T06:16:56+00:00`; pool `264`; shortlist `25`; Manhattan `142`, Brooklyn `76`, Queens `32`, Bronx `14`, out of scope `0` |
+| Live HTTP evidence | `/vera/` and all three data endpoints returned `200`; conditional data GETs also returned complete `200` JSON; browser cache `no-store`; Netlify private cache hit |
 | Deleted standalone hosting | Netlify project `vera-pipeline` is deleted; its former hostname and data route returned HTTP `404` |
 
 Refresh Git and live evidence with:
@@ -240,9 +300,11 @@ git ls-remote https://github.com/omgitsthedm/littlefightnyc-website.git HEAD ref
 git ls-remote https://github.com/omgitsthedm/vera-apartment-search.git HEAD refs/heads/main refs/heads/feed
 curl -fsSL https://littlefightnyc.com/release.json
 curl -fsSIL https://littlefightnyc.com/vera/
-curl -fsSIL https://littlefightnyc.com/vera/data/public.json
-curl -fsSIL https://littlefightnyc.com/vera/data/archive.json
-curl -fsSIL https://littlefightnyc.com/vera/data/meta.json
+curl -fsSL https://littlefightnyc.com/vera/data/public.json >/dev/null
+curl -fsSL https://littlefightnyc.com/vera/data/archive.json >/dev/null
+curl -fsSL https://littlefightnyc.com/vera/data/meta.json >/dev/null
+curl -fsSL -H 'If-None-Match: "vera-revalidation-check"' \
+  https://littlefightnyc.com/vera/data/public.json >/dev/null
 ```
 
 ## Retired surfaces
