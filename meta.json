@@ -1,0 +1,18 @@
+{
+  "generated_at": "2026-09-05T09:31:27+00:00",
+  "origin": "cloud",
+  "snapshot_source": "latest",
+  "run_id": "cloud-33957429086",
+  "pool": 250,
+  "shortlist": 18,
+  "sources": {
+    "craigslist": 163,
+    "openigloo": 84,
+    "reddit_nycapartments": 3
+  },
+  "bytes": 1591698,
+  "archive": {
+    "archived": 8,
+    "days": 24
+  }
+}
