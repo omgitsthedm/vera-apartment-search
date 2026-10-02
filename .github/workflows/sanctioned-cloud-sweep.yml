@@ -264,7 +264,9 @@ jobs:
 
       # ── Publish. No secrets in this chain. ──────────────────────────
       - name: Carry the drop archive forward
-        if: always()
+        # Keep the last verified public feed when this run did not complete.
+        # A partial run must never be allowed to replace it.
+        if: success()
         run: |
           mkdir -p public_feed
           # maintain_archive() keeps 60 rolling days, but a fresh runner has
@@ -277,11 +279,11 @@ jobs:
             || echo "[]" > public_feed/archive.json
 
       - name: Build the public feed through the canonical privacy lens
-        if: always()
+        if: success()
         run: python3 scripts/publish_cloud_feed.py --out public_feed
 
       - name: Push it to the `feed` branch
-        if: always()
+        if: success()
         run: |
           test -s public_feed/public.json || { echo "no feed built — nothing to publish"; exit 1; }
           git config user.name  "vera-cloud"

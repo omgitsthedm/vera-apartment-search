@@ -81,6 +81,93 @@ def test_personal_layer_never_ships() -> None:
         check(f"{field} is gone", field not in blob and value not in blob)
 
 
+def test_sensitive_display_titles_are_suppressed_before_the_audit() -> None:
+    """An allowlisted title is still unsafe when a source includes contact PII."""
+    print("\nallowlisted display titles:")
+    unsafe_titles = (
+        "Studio — contact 917-555-0142 or owner@example.test",
+        "Studio — contact (917)555-0142",
+        "Studio — contact 9175550142",
+    )
+    for unsafe_title in unsafe_titles:
+        source = listing(title=unsafe_title)
+        pub = PL.build_public_payload(
+            {"generated_at": "2026-08-04T00:00:00+00:00", "shortlist": [source]},
+            extras={"pool": [source]},
+        )
+        check(f"a sensitive title is removed before publication: {unsafe_title}",
+              "title" not in pub["shortlist"][0] and "title" not in pub["pool"][0])
+        check(f"the projected payload passes the independent audit: {unsafe_title}",
+              PL.audit_public_payload(pub) == [])
+
+        bypassed = json.loads(json.dumps(pub))
+        bypassed["pool"][0]["title"] = unsafe_title
+        check(f"the audit rejects an injected sensitive title: {unsafe_title}",
+              any("pool[0].title" in problem for problem in PL.audit_public_payload(bypassed)))
+
+
+def test_source_identifiers_and_urls_keep_bare_decimal_ids() -> None:
+    """Provider IDs may be ten digits; only human-readable fields treat them as phones."""
+    print("\nsource identifiers and URLs:")
+    source = listing(
+        listing_uid="zillow-1234567890",
+        source_listing_id="1234567890",
+        source_url="https://www.zillow.com/homedetails/example/1234567890_zpid/?zpid=1234567890",
+        image_urls=["https://photos.example.test/1234567890.jpg?image_id=1234567890"],
+    )
+    pub = PL.build_public_payload(
+        {"generated_at": "2026-08-04T00:00:00+00:00", "shortlist": [source]},
+        extras={"pool": [source]},
+    )
+    projected = pub["pool"][0]
+    check("schema-valid source IDs and URLs survive projection",
+          all(projected.get(key) == source[key] for key in (
+              "listing_uid", "source_listing_id", "source_url", "image_urls")))
+    check("schema-valid source IDs and URLs pass the independent audit",
+          PL.audit_public_payload(pub) == [])
+
+    injected = json.loads(json.dumps(pub))
+    injected["pool"][0]["title"] = "Call 1234567890"
+    check("a bare phone remains blocked in a human display field",
+          any("pool[0].title" in problem for problem in PL.audit_public_payload(injected)))
+
+    malformed_url = json.loads(json.dumps(pub))
+    malformed_url["pool"][0]["source_url"] = "1234567890"
+    check("a bare number cannot masquerade as a public source URL",
+          any("pool[0].source_url" in problem for problem in PL.audit_public_payload(malformed_url)))
+
+
+def test_source_urls_reject_encoded_contact_channels_and_credentials() -> None:
+    """URLs may retain provider IDs, but never contact data or credentials."""
+    print("\nsource URL privacy:")
+    unsafe_urls = (
+        "https://user:password@127.0.0.1/listing",
+        "https://example.test/listing?phone=9175550142",
+        "https://example.test/listing?%70hone=9175550142",
+        "https://example.test/contact/9175550142",
+        "https://example.test/listing?email=owner%40example.test",
+        "https://example.test/listing?note=Call%20917-555-0142",
+        "https://example.test/listing?access_token=opaque-value",
+    )
+    for url in unsafe_urls:
+        source = listing(source_url=url, image_urls=[url])
+        pub = PL.build_public_payload(
+            {"generated_at": "2026-08-04T00:00:00+00:00", "shortlist": [source]},
+            extras={"pool": [source]},
+        )
+        projected = pub["pool"][0]
+        check(f"unsafe URL is removed before publication: {url}",
+              "source_url" not in projected and projected.get("image_urls") == [])
+
+        bypassed = json.loads(json.dumps(pub))
+        bypassed["pool"][0]["source_url"] = url
+        bypassed["pool"][0]["image_urls"] = [url]
+        problems = PL.audit_public_payload(bypassed)
+        check(f"the audit rejects an injected unsafe URL: {url}",
+              any("pool[0].source_url" in problem for problem in problems)
+              and any("pool[0].image_urls" in problem for problem in problems), str(problems))
+
+
 def test_four_borough_public_scope() -> None:
     print("\nthe four-borough public scope:")
     # Coordinates are authoritative, even when a source's borough label says
@@ -434,6 +521,9 @@ def test_hunt_lens_stays_private_by_contrast() -> None:
 
 if __name__ == "__main__":
     test_personal_layer_never_ships()
+    test_sensitive_display_titles_are_suppressed_before_the_audit()
+    test_source_identifiers_and_urls_keep_bare_decimal_ids()
+    test_source_urls_reject_encoded_contact_channels_and_credentials()
     test_four_borough_public_scope()
     test_a_section_nobody_sanitized()
     test_watchlist_accusations_are_neutralized()

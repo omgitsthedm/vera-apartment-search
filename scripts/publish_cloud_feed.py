@@ -33,7 +33,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +80,20 @@ def load_snapshot() -> tuple[dict[str, Any], str]:
     raise FileNotFoundError("No VERA snapshot available to publish")
 
 
+def snapshot_generated_at(snapshot: dict[str, Any]) -> str:
+    """Return the snapshot's own timezone-aware timestamp without making it look fresh."""
+    value = snapshot.get("generated_at")
+    if not isinstance(value, str):
+        raise ValueError("Snapshot generated_at is missing or invalid")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("Snapshot generated_at is missing or invalid") from exc
+    if parsed.tzinfo is None:
+        raise ValueError("Snapshot generated_at is missing or invalid")
+    return value
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="public_feed",
@@ -90,7 +104,11 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
 
     snapshot, source = load_snapshot()
-    generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    try:
+        generated_at = snapshot_generated_at(snapshot)
+    except ValueError as exc:
+        print(f"REFUSING TO PUBLISH — {exc}", file=sys.stderr)
+        return 1
     payload = {**snapshot, "generated_at": generated_at}
 
     # Every cloud publish carried run_id: null, because state/latest_run.json
