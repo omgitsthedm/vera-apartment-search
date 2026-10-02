@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Compile public-boundary and monitor code
-        run: python3 -m py_compile scripts/public_lens.py scripts/check_public_feed_health.py
+        run: python3 -m py_compile scripts/public_lens.py scripts/check_public_feed_health.py scripts/publish_cloud_feed.py
       - name: Run deterministic engine contracts
         run: |
           python3 tests/test_scoring.py
@@ -35,3 +35,4 @@ jobs:
           python3 tests/test_neighborhood_gate.py
           python3 tests/test_public_product_boundary.py
           python3 tests/test_public_feed_health.py
+          python3 tests/test_publish_cloud_feed.py

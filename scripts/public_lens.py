@@ -32,6 +32,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, unquote, urlparse
 
 ENGINE_ROOT = Path(__file__).resolve().parents[1]
 if str(ENGINE_ROOT) not in sys.path:
@@ -241,8 +242,33 @@ SENSITIVE_KEY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
-PHONE_PATTERN = re.compile(r"(?<!\d)(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-])\d{3}[\s.-]\d{4}(?!\d)")
+PHONE_PATTERN = re.compile(
+    r"(?<!\d)(?:\+?1[\s.-]?)?(?:\(\d{3}\)[\s.-]?|\d{3}[\s.-])\d{3}[\s.-]?\d{4}(?!\d)"
+)
+BARE_PHONE_PATTERN = re.compile(r"(?<!\d)\d{10}(?!\d)")
 LOCAL_PATH_PATTERN = re.compile(r"(?:^|[\s\"'])/(?:Users|home|var|tmp)/|[A-Z]:\\\\", re.IGNORECASE)
+
+# These are public source identities, not human display copy. A decimal
+# provider identifier can be indistinguishable from an unformatted phone
+# number, so bare ten-digit matching is intentionally not applied here. Every
+# other public field, including human-readable titles and notes, remains
+# covered by the strict phone check.
+PUBLIC_BARE_IDENTIFIER_FIELDS = frozenset({
+    "bbl", "bin", "duplicate_cluster_id", "listing_uid", "public_record_id",
+    "source_listing_id",
+})
+PUBLIC_URL_FIELDS = frozenset({"source_url", "image_urls"})
+
+# A public listing URL may contain an opaque provider identifier such as a
+# Zillow zpid. It may not carry a contact route, a credential, or a decoded
+# contact value. These field names are deliberately narrow: ordinary tracking
+# parameters and opaque listing IDs stay valid, while contact channels fail
+# closed before a URL reaches the public feed.
+URL_SENSITIVE_FIELD_PATTERN = re.compile(
+    r"(?:^|[_\-.])(?:api[_-]?key|authorization|cookie|credential|e-?mail|email|"
+    r"mobile|phone|telephone|tel|cell|contact|secret|token|password|session)(?:$|[_\-.])",
+    re.IGNORECASE,
+)
 
 # Editorial accusation patterns (owner watchlists). Neutralized publicly:
 # the counts are public record, the accusation is the owner's opinion.
@@ -270,9 +296,27 @@ def neutralize(value: Any) -> Any:
     return value
 
 
-def _scalar(value: Any) -> Any:
-    """Return a JSON scalar or None. Containers require a named schema."""
-    if value is None or isinstance(value, (str, int, float, bool)):
+def _has_phone(value: str, *, allow_bare_identifier: bool = False) -> bool:
+    return bool(PHONE_PATTERN.search(value) or (
+        not allow_bare_identifier and BARE_PHONE_PATTERN.search(value)
+    ))
+
+
+def _scalar(value: Any, *, allow_bare_identifier: bool = False) -> Any:
+    """Return a public-safe JSON scalar or None.
+
+    Public fields deliberately include a few human-readable strings such as a
+    listing title. A source title can carry a contact channel even though its
+    *field name* is allowlisted, so remove that value before the independent
+    audit runs. Containers still require a named schema.
+    """
+    if isinstance(value, str):
+        value = neutralize(value)
+        if (EMAIL_PATTERN.search(value) or _has_phone(value, allow_bare_identifier=allow_bare_identifier)
+                or LOCAL_PATH_PATTERN.search(value)):
+            return None
+        return value
+    if value is None or isinstance(value, (int, float, bool)):
         return neutralize(value)
     return None
 
@@ -290,10 +334,55 @@ def _object(value: Any, fields: frozenset[str]) -> dict[str, Any]:
     return result
 
 
-def _string_list(value: Any) -> list[str]:
+def _decoded_url_text(value: str) -> str:
+    """Decode a bounded number of percent-encoding layers for safety checks."""
+    decoded = value
+    for _ in range(3):
+        next_value = unquote(decoded)
+        if next_value == decoded:
+            break
+        decoded = next_value
+    return decoded
+
+
+def _url_scalar(value: Any) -> str | None:
+    """Return only a public-safe absolute URL.
+
+    Bare decimal listing identifiers remain valid in normal paths and query
+    values. Contact-shaped fields, credentials, and encoded contact values do
+    not: an upstream URL is still public payload and must not bypass the lens.
+    """
+    scalar = _scalar(value, allow_bare_identifier=True)
+    if not isinstance(scalar, str):
+        return None
+    try:
+        parsed = urlparse(scalar)
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    if parsed.username is not None or parsed.password is not None:
+        return None
+
+    decoded = _decoded_url_text(scalar)
+    if EMAIL_PATTERN.search(decoded) or PHONE_PATTERN.search(decoded) or LOCAL_PATH_PATTERN.search(decoded):
+        return None
+
+    for key, _ in parse_qsl(parsed.query, keep_blank_values=True):
+        if URL_SENSITIVE_FIELD_PATTERN.search(_decoded_url_text(key)):
+            return None
+    for segment in parsed.path.split("/"):
+        if segment and URL_SENSITIVE_FIELD_PATTERN.search(_decoded_url_text(segment)):
+            return None
+    return scalar
+
+
+def _string_list(value: Any, *, urls: bool = False) -> list[str]:
     if not isinstance(value, list):
         return []
-    return [neutralize(item) for item in value if isinstance(item, str)]
+    sanitizer = _url_scalar if urls else _scalar
+    return [item for entry in value if isinstance(entry, str)
+            if isinstance(item := sanitizer(entry), str)]
 
 
 def _object_list(value: Any, fields: frozenset[str]) -> list[dict[str, Any]]:
@@ -317,6 +406,12 @@ def _price_history(value: Any) -> list[list[Any]]:
 
 
 def _listing_value(key: str, value: Any) -> Any:
+    if key == "source_url":
+        return _url_scalar(value)
+    if key == "image_urls":
+        return _string_list(value, urls=True)
+    if key in PUBLIC_BARE_IDENTIFIER_FIELDS:
+        return _scalar(value, allow_bare_identifier=True)
     if key == "contact_reuse_count":
         return value if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 else None
     if key == "component_scores":
@@ -882,6 +977,13 @@ def audit_public_payload(public: Any) -> list[str]:
                 "latitude": "number", "longitude": "number", "rent": "number",
                 "source_name": "string",
             })
+            if "source_url" in item and (not isinstance(item["source_url"], str) or not _url_scalar(item["source_url"])):
+                problems.append(f"{item_path}.source_url — must be an absolute http(s) URL")
+            if "image_urls" in item:
+                image_urls = item["image_urls"]
+                if (not isinstance(image_urls, list)
+                        or any(not isinstance(url, str) or not _url_scalar(url) for url in image_urls)):
+                    problems.append(f"{item_path}.image_urls — must contain only absolute http(s) URLs")
             public_borough, scope_reason = public_borough_for_listing(item)
             if public_borough is None:
                 problems.append(f"{item_path} — outside VERA's four-borough public scope: {scope_reason}")
@@ -950,7 +1052,7 @@ def audit_public_payload(public: Any) -> list[str]:
                             or (isinstance(point[1], float) and not math.isfinite(point[1]))):
                         problems.append(f"{item_path}.price_history[{history_index}] — must be [date string, rent number]")
 
-    def walk(node: Any, path: str) -> None:
+    def walk(node: Any, path: str, *, allow_bare_identifier: bool = False) -> None:
         if isinstance(node, dict):
             for k, v in node.items():
                 if not isinstance(k, str):
@@ -958,16 +1060,20 @@ def audit_public_payload(public: Any) -> list[str]:
                 elif (k not in PUBLIC_AGGREGATE_FIELDS
                       and (k in PERSONAL_FIELDS or SENSITIVE_KEY_PATTERN.search(k))):
                     problems.append(f"{path}.{k} — sensitive key")
-                walk(v, f"{path}.{k}")
+                walk(
+                    v,
+                    f"{path}.{k}",
+                    allow_bare_identifier=(k in PUBLIC_BARE_IDENTIFIER_FIELDS or k in PUBLIC_URL_FIELDS),
+                )
         elif isinstance(node, list):
             for i, v in enumerate(node):
-                walk(v, f"{path}[{i}]")
+                walk(v, f"{path}[{i}]", allow_bare_identifier=allow_bare_identifier)
         elif isinstance(node, str):
             if WATCHLIST_PATTERN.search(node):
                 problems.append(f"{path} — un-neutralized watchlist wording")
             if EMAIL_PATTERN.search(node):
                 problems.append(f"{path} — email-like value")
-            if PHONE_PATTERN.search(node):
+            if _has_phone(node, allow_bare_identifier=allow_bare_identifier):
                 problems.append(f"{path} — phone-like value")
             if LOCAL_PATH_PATTERN.search(node):
                 problems.append(f"{path} — local filesystem path")
