@@ -12,3 +12,7 @@
 - This system discovers and ranks listings only; it must not contact landlords or submit applications.
 
 Use `SOURCE_OF_TRUTH.md` for stable routing, `VERA-HANDOFF.md` for cross-repository recovery and dated live evidence, and `README.md` for engine orientation. Reverify every point-in-time value in the handoff before a release action. Preserve unrelated work and distinguish source changes from scheduled generated output.
+
+## Imported Claude Cowork project instructions
+
+Apartment Search
