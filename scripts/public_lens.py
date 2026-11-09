@@ -277,6 +277,18 @@ def _scalar(value: Any) -> Any:
     return None
 
 
+def _public_title(value: Any) -> Any:
+    """Omit contact-bearing source titles; the private listing stays intact.
+
+    A title is optional display text, not permission to publish contact data.
+    Keep the rest of the public record and its address fallback available.
+    The independent audit still rejects these values if projection is bypassed.
+    """
+    if isinstance(value, str) and (PHONE_PATTERN.search(value) or EMAIL_PATTERN.search(value)):
+        return None
+    return _scalar(value)
+
+
 def _object(value: Any, fields: frozenset[str]) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
@@ -284,7 +296,7 @@ def _object(value: Any, fields: frozenset[str]) -> dict[str, Any]:
     for key in fields:
         if key not in value:
             continue
-        scalar = _scalar(value[key])
+        scalar = _public_title(value[key]) if key == "title" else _scalar(value[key])
         if scalar is not None:
             result[key] = scalar
     return result
@@ -317,6 +329,8 @@ def _price_history(value: Any) -> list[list[Any]]:
 
 
 def _listing_value(key: str, value: Any) -> Any:
+    if key == "title":
+        return _public_title(value)
     if key == "contact_reuse_count":
         return value if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 else None
     if key == "component_scores":

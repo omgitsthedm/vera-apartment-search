@@ -13,10 +13,13 @@ the stronger rule: a field is absent unless the public schema admits it.
 from __future__ import annotations
 
 import importlib.util
+import contextlib
+import io
 import json
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -79,6 +82,89 @@ def test_personal_layer_never_ships() -> None:
     blob = json.dumps(pub)
     for field, value in PERSONAL.items():
         check(f"{field} is gone", field not in blob and value not in blob)
+
+
+def test_contact_bearing_titles_are_private_on_every_surface() -> None:
+    print("\ncontact-bearing listing titles:")
+    titles = [
+        "Sunny studio — call 917-555-0142",
+        "Sunny studio — call +1 (917) 555-0142",
+        "Sunny studio — text 917.555.0142",
+        "Sunny studio — owner@example.com",
+    ]
+    for index, title in enumerate(titles):
+        row = listing(title=title, change_detail={"title": title, "rent": 2200})
+        hunt = {
+            "generated_at": "2026-09-11T00:00:00+00:00",
+            "shortlist": [row], "manual_review": [row],
+            "daily_changes": {key: [row] for key in (
+                "new_listings", "price_changes", "gone_listings")},
+        }
+        original = json.dumps(hunt, sort_keys=True)
+        public = PL.build_public_payload(hunt, extras={"pool": [row]})
+        groups = [public["pool"], public["shortlist"], public["manual_review"]]
+        groups.extend(public["daily_changes"][key] for key in (
+            "new_listings", "price_changes", "gone_listings"))
+        check(f"contact title case {index} is omitted on every surface",
+              all(len(group) == 1 and "title" not in group[0]
+                  and "title" not in group[0]["change_detail"] for group in groups))
+        check(f"case {index} retains the public listing and its safe facts",
+              all(group[0]["rent"] == 2200 and group[0]["listing_uid"] == "u1"
+                  and group[0]["address_normalized"] == "459 keap st" for group in groups))
+        check(f"case {index} leaves the private input intact",
+              json.dumps(hunt, sort_keys=True) == original and row["title"] == title)
+        check(f"case {index} passes the unchanged independent audit",
+              PL.audit_public_payload(public) == [])
+        archive = PL.sanitize_archive([{"date": "2026-09-10", "listings": [row]}])
+        check(f"case {index} is omitted from older archive entries too",
+              "title" not in archive[0]["listings"][0]
+              and archive[0]["listings"][0]["rent"] == 2200)
+        injected = json.loads(json.dumps(public))
+        injected["pool"][0]["title"] = title
+        check(f"case {index} still fails if it bypasses the projection",
+              any("$.pool[0].title" in problem and "-like value" in problem
+                  for problem in PL.audit_public_payload(injected)))
+
+    safe = "Sunny 1BR · $2,200 · 650 sq ft · available 2026-09-11"
+    projected = PL.sanitize_listing(listing(title=safe, change_detail={"title": safe}))
+    check("ordinary numeric listing titles remain unchanged",
+          projected["title"] == safe and projected["change_detail"]["title"] == safe)
+
+
+def test_publisher_writes_only_audited_synthetic_feed() -> None:
+    """Exercise local file emission with all private-data entry points stubbed."""
+    import publish_cloud_feed as publisher
+
+    print("\nthe publisher's synthetic-only privacy boundary:")
+    row = listing(title="Sunny studio — call 917-555-0142")
+    for leaked_elsewhere in (False, True):
+        candidate = dict(row)
+        if leaked_elsewhere:
+            candidate["trust_caveats"] = ["Call 917-555-0142"]
+        with tempfile.TemporaryDirectory() as folder:
+            out = Path(folder)
+            with (
+                patch.object(publisher, "load_snapshot", return_value=({"shortlist": [candidate]}, "latest")),
+                patch.object(publisher, "build_hunt_payload", side_effect=lambda value: value),
+                patch.object(publisher, "build_public_extras", return_value={"pool": [candidate]}),
+                patch.object(sys, "argv", ["publish_cloud_feed.py", "--out", folder]),
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                result = publisher.main()
+            if leaked_elsewhere:
+                check("publisher still refuses contact data outside the title",
+                      result == 1 and list(out.iterdir()) == [])
+            else:
+                check("publisher writes the three files after safe title projection",
+                      result == 0 and {p.name for p in out.iterdir()} == {
+                          "public.json", "archive.json", "meta.json"})
+                public = json.loads((out / "public.json").read_text())
+                archive = json.loads((out / "archive.json").read_text())
+                check("emitted feed passes the real guard and retains the listing",
+                      PL.audit_public_payload(public) == [] and len(public["pool"]) == 1)
+                check("neither feed nor archive emits the synthetic contact title",
+                      "917-555-0142" not in json.dumps([public, archive]))
 
 
 def test_four_borough_public_scope() -> None:
@@ -434,6 +520,8 @@ def test_hunt_lens_stays_private_by_contrast() -> None:
 
 if __name__ == "__main__":
     test_personal_layer_never_ships()
+    test_contact_bearing_titles_are_private_on_every_surface()
+    test_publisher_writes_only_audited_synthetic_feed()
     test_four_borough_public_scope()
     test_a_section_nobody_sanitized()
     test_watchlist_accusations_are_neutralized()
