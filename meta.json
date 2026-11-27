@@ -1,0 +1,17 @@
+{
+  "generated_at": "2026-11-27T15:48:38+00:00",
+  "origin": "cloud",
+  "snapshot_source": "latest",
+  "run_id": "cloud-46025184773",
+  "pool": 228,
+  "shortlist": 11,
+  "sources": {
+    "craigslist": 165,
+    "openigloo": 63
+  },
+  "bytes": 1303139,
+  "archive": {
+    "archived": 4,
+    "days": 60
+  }
+}
