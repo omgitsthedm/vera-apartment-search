@@ -229,14 +229,8 @@ jobs:
           else:
               print('CLOUD POOL: no snapshot produced')
           PY
-      - name: Upload cloud snapshot
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: cloud-snapshot
-          path: snapshots/latest_snapshot.json
-          retention-days: 7
-          if-no-files-found: ignore
+      # No artifact of the snapshot: it is the pre-lens file, with advertiser
+      # contact fields and analyst notes, and this repository is public.
 
       # Saved even when the pipeline failed: a partial run still advanced
       # the photo and price memory, and throwing that away would mean the
